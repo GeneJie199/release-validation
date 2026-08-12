@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -timeout 120s ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - name: Verify tag is documented
+        shell: bash
+        run: grep -F "## ${GITHUB_REF_NAME#v} " CHANGELOG.md
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64, ext: "", archive: "tar.gz" }
+          - { goos: linux, goarch: arm64, ext: "", archive: "tar.gz" }
+          - { goos: darwin, goarch: amd64, ext: "", archive: "tar.gz" }
+          - { goos: darwin, goarch: arm64, ext: "", archive: "tar.gz" }
+          - { goos: windows, goarch: amd64, ext: ".exe", archive: "zip" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and package
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          BINARY=releaseguard-${GOOS}-${GOARCH}${{ matrix.ext }}
+          STAGE=releaseguard-${VERSION}-${GOOS}-${GOARCH}
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "${BINARY}" ./cmd/releaseguard
+          mkdir "${STAGE}"
+          cp "${BINARY}" "${STAGE}/releaseguard${{ matrix.ext }}"
+          cp README.md LICENSE scripts/install.sh "${STAGE}/"
+          if [ "${GOOS}" = windows ]; then
+            zip -qr "${STAGE}.zip" "${STAGE}"
+          else
+            tar -czf "${STAGE}.tar.gz" "${STAGE}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: releaseguard-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            releaseguard-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+            releaseguard-*-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.archive }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cd dist && sha256sum releaseguard-* > checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

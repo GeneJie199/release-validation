@@ -1,0 +1,49 @@
+{
+  "release_id": "orders-api-2026-08-12",
+  "version": "1.4.0",
+  "candidate_file": "release-candidate.json",
+  "repository": ".",
+  "base_ref": "v1.3.0",
+  "target_ref": "HEAD",
+  "expected_files": [
+    "cmd/**",
+    "internal/**",
+    "migrations/**",
+    "deploy/**"
+  ],
+  "recovery_checks": [
+    {"name": "previous artifact retained", "type": "file", "path": "dist/orders-api-1.3.0", "sha256": "replace-with-reviewed-previous-sha256"},
+    {"name": "backup restore check", "type": "sql", "driver": "postgres", "dsn_env": "RELEASEGUARD_RECOVERY_DATABASE_DSN", "query": "SELECT 1", "timeout_seconds": 5}
+  ],
+  "checks": [
+    {"name": "unit tests", "type": "command", "command": "go test ./...", "timeout_seconds": 180},
+    {"name": "health endpoint", "type": "http", "url": "https://orders.example.internal/health", "want_status": 200, "timeout_seconds": 10},
+    {"name": "artifact digest", "type": "file", "path": "dist/orders-api", "sha256": "replace-with-reviewed-sha256"},
+    {"name": "runtime JSON", "type": "json", "path": "runtime.json", "json_path": "status", "equals": "ready"},
+    {"name": "environment delta", "type": "env", "before_path": "config/before.env", "after_path": "config/after.env", "required_keys": ["APP_ENV", "DATABASE_URL"], "allowed_changes": ["IMAGE_TAG", "LOG_LEVEL"]},
+    {"name": "compose delta", "type": "compose", "before_path": "config/compose-before.yml", "after_path": "config/compose-after.yml", "allowed_changes": ["services.api.image"]},
+    {"name": "database smoke", "type": "sql", "driver": "postgres", "dsn_env": "RELEASEGUARD_DATABASE_DSN", "query": "SELECT 1", "timeout_seconds": 5}
+  ],
+  "drift_file": "drift.json",
+  "expected_drifts": ["service:docker:host-01/orders-api", "endpoint:host-01/tcp/*/8080"],
+  "fleet": {
+    "center_url": "https://fleet.example.internal:8770",
+    "token_env": "FLEET_TOKEN",
+    "nodes": ["host-01", "host-02"],
+    "version_label": "version",
+    "expected_versions": {"host-01": "1.4.0", "host-02": "1.4.0"},
+    "max_age_seconds": 120
+  },
+  "observation": {"seconds": 300, "poll_seconds": 10, "max_critical_alerts": 0},
+  "metrics": [
+    {"name": "API latency", "metric": "http_request_latency_ms", "node": "host-01", "aggregate": "avg", "series_reduce": "max", "baseline_seconds": 300, "direction": "lower", "max_regression_percent": 15, "max_value": 250},
+    {"name": "Request success rate", "metric": "http_request_success_ratio", "node": "host-01", "aggregate": "avg", "series_reduce": "min", "baseline_seconds": 300, "direction": "higher", "max_regression_percent": 2, "min_value": 0.99}
+  ],
+  "rollback": [
+    "Remove the new nodes from the load balancer",
+    "Restore the reviewed 1.3.0 binary and configuration",
+    "Run the health and database smoke checks",
+    "Reopen traffic only after FleetScope is healthy"
+  ],
+  "metadata": {"service": "orders-api", "environment": "production"}
+}

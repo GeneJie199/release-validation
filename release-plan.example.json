@@ -1,0 +1,12 @@
+{
+  "release_id": "release-demo-001",
+  "version": "0.3.0",
+  "recovery_checks": [
+    {"name": "rollback runbook present", "type": "file", "path": "docs/operations.md"}
+  ],
+  "checks": [
+    {"name": "README present", "type": "file", "path": "README.md"},
+    {"name": "test suite", "type": "command", "command": "go test ./...", "timeout_seconds": 120}
+  ],
+  "rollback": ["Stop the new process", "Restore the previous binary and configuration", "Verify the previous health endpoint"]
+}

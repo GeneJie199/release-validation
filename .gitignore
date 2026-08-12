@@ -1,0 +1,8 @@
+/dist/
+/.qa/
+/release-report*.json
+/*.approval.json
+*.exe
+*.db
+*.db-shm
+*.db-wal

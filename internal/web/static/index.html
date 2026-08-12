@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ReleaseGuard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header><div class="product-brand"><span class="suite-kicker">AI DEVOPS OPEN SUITE</span><div><strong class="product-name">ReleaseGuard</strong><span class="product-subtitle">发布验证与批准</span></div></div><div class="header-tools"><details class="suite-switcher"><summary>模块</summary><div class="suite-menu"><a data-suite="devcycle">DevCycle<span>研发交付</span></a><a data-suite="infrascout">InfraScout<span>基础设施发现</span></a><a data-suite="fleetscope">FleetScope<span>原生监控</span></a><a data-suite="releaseguard" class="current">ReleaseGuard<span>发布门禁</span></a></div></details><button id="export-json" type="button" disabled>导出 JSON</button><button id="print-report" type="button">打印报告</button><div class="release-id"><span id="release-label">正在读取发布</span><b id="decision">LOADING</b></div></div></header>
+  <nav aria-label="发布报告导航">
+    <button class="active" data-target="summary" type="button">结论</button>
+    <button data-target="checks" type="button">门禁结果</button>
+    <button data-target="changes" type="button">变更清单</button>
+    <button data-target="fleet" type="button">目标节点</button>
+    <button data-target="history" type="button">运行历史</button>
+    <button data-target="rollback" type="button">回滚与批准</button>
+  </nav>
+  <main>
+	<section id="summary" class="view active" tabindex="-1"><div class="title"><h2>发布决策台</h2><span id="generated"></span></div><div id="report-lock" class="report-lock"></div><div class="decision-layout"><div><div id="metrics" class="metrics"></div><div id="reason" class="decision-reason"></div></div><aside id="decision-actions" class="decision-actions"></aside></div><div class="two-col"><div><h3>开发候选</h3><div id="candidate" class="panel"></div></div><div><h3>证据完整性</h3><div id="integrity" class="panel"></div></div></div></section>
+	<section id="checks" class="view" tabindex="-1"><div class="title"><h2>门禁结果</h2><select id="check-filter" aria-label="按状态筛选门禁结果"><option value="">全部</option><option value="fail">未通过</option><option value="pass">已通过</option></select></div><div id="check-summary" class="check-summary"></div><div id="check-list" class="table-wrap"></div></section>
+	<section id="changes" class="view" tabindex="-1"><div class="title"><h2>Git 变更清单</h2><span id="git-range"></span></div><div id="git-stats" class="metrics compact"></div><div class="two-col"><div><h3>提交</h3><div id="commits" class="list panel"></div></div><div><h3>敏感文件审查</h3><div id="sensitive" class="list panel"></div></div></div><h3>全部文件</h3><div id="files" class="table-wrap"></div></section>
+	<section id="fleet" class="view" tabindex="-1"><div class="title"><h2>目标节点与指标</h2><div class="title-actions"><span id="fleet-source">来自 FleetScope 的实际观察</span><a class="suite-handoff" data-suite="fleetscope">打开 FleetScope 节点视图 →</a></div></div><div id="fleet-table" class="table-wrap"></div><h3>发布前后指标</h3><div id="metric-comparisons" class="table-wrap"></div><h3>观察窗口</h3><div id="observation" class="panel"></div></section>
+	<section id="history" class="view" tabindex="-1"><div class="title"><h2>运行历史</h2><button id="refresh-runs" class="evidence-btn" type="button">刷新</button></div><div id="run-history" class="table-wrap"></div></section>
+	<section id="rollback" class="view" tabindex="-1"><div class="title"><h2>回滚与人工决策</h2><span>工具输出建议，最终决策由人确认。</span></div><div class="two-col"><div><h3>回滚步骤</h3><ol id="rollback-list" class="panel"></ol></div><div><h3>人工批准</h3><div id="approval" class="panel"></div></div></div></section>
+  </main>
+	<dialog id="evidence-dialog" aria-labelledby="evidence-title"><div class="dialog-head"><div><small>结构化证据</small><h2 id="evidence-title">检查证据</h2></div><button id="close-dialog" type="button">关闭</button></div><div id="evidence-structured" class="evidence-structured"></div><details class="raw-evidence"><summary>查看原始 JSON</summary><pre id="evidence"></pre></details></dialog>
+  <div id="fatal" class="fatal" role="alert"><div><b>发布报告无法加载</b><p id="fatal-message"></p><button id="retry-report" type="button">重试</button></div></div>
+	<div id="error" role="status" aria-live="polite"><span id="error-message"></span><button id="dismiss-error" type="button" aria-label="关闭通知">关闭</button></div>
+  <script src="suite.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

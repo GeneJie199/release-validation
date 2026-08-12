@@ -1,0 +1,20 @@
+[Unit]
+Description=ReleaseGuard local report viewer
+After=network.target
+
+[Service]
+Type=simple
+User=releaseguard
+Group=releaseguard
+ExecStart=/usr/local/bin/releaseguard serve --report /var/lib/releaseguard/release-report.json --state /var/lib/releaseguard/releaseguard-runs.db --addr 127.0.0.1:8771
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/var/lib/releaseguard
+
+[Install]
+WantedBy=multi-user.target
