@@ -12,6 +12,7 @@
 - Add renewable single-owner run leases, read-only live-WAL coverage, cross-platform CI, test-gated tag builds, and installer checksum verification.
 - Harden the decision console against malformed evidence, path disclosure, static-resource writes, approval brute force, stale polling, and inaccessible navigation state.
 - Unify suite navigation and contextual FleetScope handoff, separate success/info/error notifications, consolidate viewer styles, localize dynamic decision summaries, and tighten mobile layout.
+- Align release-candidate changelog matching with the stable release family and run tag gates on Linux, Windows, and macOS before publishing.
 
 ## 0.2.0 - 2026-08-12
 
