@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 - 2026-08-12
+
+- Align the suite patch release with FleetScope's corrected transient CPU health classification while continuing to block critical, stale, or unreachable nodes.
+
 ## 0.3.0 - 2026-08-12
 
 - Compare FleetScope native metric baselines with post-release observation windows.
