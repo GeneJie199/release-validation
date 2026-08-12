@@ -80,10 +80,12 @@ func TestLiveRunReportAndHistory(t *testing.T) {
 func TestHandlerServesReportApprovalAndSecurityHeaders(t *testing.T) {
 	dir := t.TempDir()
 	report := filepath.Join(dir, "report.json")
-	if err := os.WriteFile(report, []byte(`{"decision":"GO"}`), 0o600); err != nil {
+	served := guard.Report{SchemaVersion: "releaseguard.report/v1", ReleaseID: "release-a", Decision: "GO", PlanSHA256: strings.Repeat("a", 64)}
+	raw, _ := json.Marshal(served)
+	if err := os.WriteFile(report, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(report+".approval.json", []byte(`{"decision":"GO","approved_by":"qa"}`), 0o600); err != nil {
+	if err := guard.CreateApproval(report, report+".approval.json", "GO", "qa", "reviewed"); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(Handler(report))
@@ -114,6 +116,38 @@ func TestHandlerServesReportApprovalAndSecurityHeaders(t *testing.T) {
 	}
 	if res.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("cache control = %q", res.Header.Get("Cache-Control"))
+	}
+}
+
+func TestHandlerDoesNotServeApprovalBoundToPreviousReport(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "report.json")
+	first := guard.Report{SchemaVersion: "releaseguard.report/v1", ReleaseID: "release-a", Decision: "GO", PlanSHA256: strings.Repeat("a", 64)}
+	raw, _ := json.Marshal(first)
+	if err := os.WriteFile(reportPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := guard.CreateApproval(reportPath, reportPath+".approval.json", "GO", "qa", "first report"); err != nil {
+		t.Fatal(err)
+	}
+	second := guard.Report{SchemaVersion: "releaseguard.report/v1", ReleaseID: "release-b", Decision: "GO", PlanSHA256: strings.Repeat("b", 64)}
+	raw, _ = json.Marshal(second)
+	if err := os.WriteFile(reportPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(Handler(reportPath))
+	defer server.Close()
+	response, err := http.Get(server.URL + "/api/v1/approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("stale approval status = %d", response.StatusCode)
+	}
+	if _, err := os.Stat(reportPath + ".approval.json"); err != nil {
+		t.Fatalf("stale approval must remain available for audit: %v", err)
 	}
 }
 

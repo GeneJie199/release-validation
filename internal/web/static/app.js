@@ -357,9 +357,15 @@
 			capabilityWarningShown = true;
 			notify("审批能力状态读取失败，页面已按只读模式保护。");
 		}
-	}
+    }
     if (reportResult.status === "rejected") {
-      $("#fatal-message").textContent = reportResult.reason.message;
+      const error = reportResult.reason;
+      $("#fatal-message").textContent = error.status === 404
+        ? "当前没有可用的发布报告。可以查看运行历史，或回到 DevCycle 生成新的发布候选。"
+        : error.status === 503
+          ? "发布报告服务暂不可用，请稍后重新读取。"
+          : error.message;
+      $("#fatal-history").classList.toggle("hidden", !capabilities.live_runs);
       $("#fatal").classList.add("show");
       $("#decision").textContent = "ERROR";
       return;
@@ -395,6 +401,11 @@
   $("#check-filter").addEventListener("change", renderChecks);
   $("#refresh-runs").addEventListener("click", loadRuns);
   $("#retry-report").addEventListener("click", load);
+  $("#fatal-history").addEventListener("click", () => {
+    $("#fatal").classList.remove("show");
+    navigate("history");
+    loadRuns();
+  });
   $("#print-report").addEventListener("click", () => window.print());
   $("#export-json").addEventListener("click", () => {
     if (!report) return;

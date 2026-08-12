@@ -125,14 +125,15 @@ func handler(reportPath, approvalToken string, runs *runstore.Store) http.Handle
 		})
 	}
 	mux.HandleFunc("GET /api/v1/approval", func(w http.ResponseWriter, _ *http.Request) {
-		b, e := os.ReadFile(reportPath + ".approval.json")
-		if e != nil {
+		approval, _, err := guard.LoadBoundApproval(reportPath)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				log.Printf("ignore unbound approval: %v", err)
+			}
 			http.Error(w, "approval not recorded", http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(b)
+		write(w, approval)
 	})
 	mux.HandleFunc("POST /api/v1/approval", func(w http.ResponseWriter, r *http.Request) {
 		if approvalToken == "" {
@@ -178,7 +179,12 @@ func handler(reportPath, approvalToken string, runs *runstore.Store) http.Handle
 			http.Error(w, "invalid approval JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		out := reportPath + ".approval.json"
+		out, err := guard.ApprovalOutputPath(reportPath)
+		if err != nil {
+			log.Printf("resolve approval output: %v", err)
+			http.Error(w, "cannot bind approval to the current report", http.StatusInternalServerError)
+			return
+		}
 		if err := guard.CreateApproval(reportPath, out, in.Decision, strings.TrimSpace(in.ApprovedBy), strings.TrimSpace(in.Note)); err != nil {
 			log.Printf("create approval: %v", err)
 			status := http.StatusBadRequest
@@ -192,7 +198,7 @@ func handler(reportPath, approvalToken string, runs *runstore.Store) http.Handle
 			http.Error(w, message, status)
 			return
 		}
-		b, err := os.ReadFile(out)
+		approval, b, err := guard.LoadBoundApproval(reportPath)
 		if err != nil {
 			log.Printf("read created approval: %v", err)
 			http.Error(w, "approval was recorded but cannot be read", http.StatusInternalServerError)
@@ -201,7 +207,11 @@ func handler(reportPath, approvalToken string, runs *runstore.Store) http.Handle
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write(b)
+		if len(b) > 0 {
+			_, _ = w.Write(b)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(approval)
 	})
 	sub, _ := fs.Sub(assets, "static")
 	static := http.FileServer(http.FS(sub))

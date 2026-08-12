@@ -499,6 +499,94 @@ func CreateApproval(reportPath, out, decision, by, note string) error {
 	return writeJSONAtomic(out, a, false)
 }
 
+func approvalIdentity(reportPath string) (Report, string, error) {
+	report, raw, err := LoadReport(reportPath)
+	if err != nil {
+		return report, "", err
+	}
+	sum := sha256.Sum256(raw)
+	return report, hex.EncodeToString(sum[:]), nil
+}
+
+func decodeApproval(raw []byte) (Approval, error) {
+	var approval Approval
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&approval); err != nil {
+		return approval, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return approval, errors.New("approval must contain exactly one JSON object")
+	}
+	if approval.SchemaVersion != "releaseguard.approval/v1" || strings.TrimSpace(approval.ReleaseID) == "" || len(approval.ReportSHA256) != 64 || strings.TrimSpace(approval.ApprovedBy) == "" || approval.ApprovedAt.IsZero() {
+		return approval, errors.New("approval identity is invalid")
+	}
+	if _, ok := decisionRank(approval.Decision); !ok {
+		return approval, errors.New("approval decision is invalid")
+	}
+	return approval, nil
+}
+
+func approvalMatches(approval Approval, report Report, digest string) bool {
+	return approval.ReleaseID == report.ReleaseID && strings.EqualFold(approval.ReportSHA256, digest)
+}
+
+func approvalDigestPath(reportPath, digest string) string {
+	return reportPath + "." + digest + ".approval.json"
+}
+
+// ApprovalOutputPath preserves an existing approval while allowing a new report
+// written at the same path to receive its own immutable, digest-bound approval.
+func ApprovalOutputPath(reportPath string) (string, error) {
+	report, digest, err := approvalIdentity(reportPath)
+	if err != nil {
+		return "", err
+	}
+	legacy := reportPath + ".approval.json"
+	raw, err := os.ReadFile(legacy)
+	if errors.Is(err, os.ErrNotExist) {
+		return legacy, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	approval, decodeErr := decodeApproval(raw)
+	if decodeErr == nil && approvalMatches(approval, report, digest) {
+		return legacy, nil
+	}
+	return approvalDigestPath(reportPath, digest), nil
+}
+
+// LoadBoundApproval returns only an approval whose release ID and report digest
+// match the current immutable report. Stale sidecars remain on disk for audit.
+func LoadBoundApproval(reportPath string) (Approval, []byte, error) {
+	var zero Approval
+	report, digest, err := approvalIdentity(reportPath)
+	if err != nil {
+		return zero, nil, err
+	}
+	paths := []string{approvalDigestPath(reportPath, digest), reportPath + ".approval.json"}
+	found := false
+	for _, path := range paths {
+		raw, readErr := os.ReadFile(path)
+		if errors.Is(readErr, os.ErrNotExist) {
+			continue
+		}
+		if readErr != nil {
+			return zero, nil, readErr
+		}
+		found = true
+		approval, decodeErr := decodeApproval(raw)
+		if decodeErr == nil && approvalMatches(approval, report, digest) {
+			return approval, raw, nil
+		}
+	}
+	if found {
+		return zero, nil, errors.New("approval does not match the current report")
+	}
+	return zero, nil, os.ErrNotExist
+}
+
 func LoadReport(path string) (Report, []byte, error) {
 	var report Report
 	b, err := os.ReadFile(path)

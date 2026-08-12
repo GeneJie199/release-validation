@@ -223,11 +223,15 @@ func confirm(args []string) {
 	decision := f.String("decision", "", "human decision: GO, HOLD, or NO-GO")
 	by := f.String("by", "", "approver identity")
 	note := f.String("note", "", "approval note")
-	out := f.String("out", "", "approval output (default: REPORT.approval.json)")
+	out := f.String("out", "", "approval output (default: a digest-bound sidecar next to REPORT)")
 	statePath := f.String("state", "releaseguard-runs.db", "persistent run database used to reject approval during an active run (empty disables)")
 	_ = f.Parse(args)
 	if *out == "" {
-		*out = *report + ".approval.json"
+		resolved, err := guard.ApprovalOutputPath(*report)
+		if err != nil {
+			log.Fatal(err)
+		}
+		*out = resolved
 	}
 	loaded, _, err := guard.LoadReport(*report)
 	if err != nil {

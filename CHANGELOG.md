@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 - 2026-08-13
+
+- Replace the dead-end missing-report overlay with localized recovery actions for retry, persisted run history, and DevCycle handoff.
+- Add consistent visual product marks to the suite switcher and a clearer export command.
+- Reject approvals whose release identity or report digest does not match the currently served report, and retain per-report immutable approvals when a report path is reused.
+
 ## 0.3.1 - 2026-08-12
 
 - Align the suite patch release with FleetScope's corrected transient CPU health classification while continuing to block critical, stale, or unreachable nodes.

@@ -101,6 +101,43 @@ func TestCandidateGitManifestAndImmutableApproval(t *testing.T) {
 	}
 }
 
+func TestApprovalOutputPathKeepsApprovalsBoundAcrossReportReplacement(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "report.json")
+	write := func(releaseID, planSHA string) {
+		t.Helper()
+		report := Report{SchemaVersion: "releaseguard.report/v1", ReleaseID: releaseID, Decision: "GO", PlanSHA256: planSHA}
+		raw, _ := json.Marshal(report)
+		if err := os.WriteFile(reportPath, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("release-a", strings.Repeat("a", 64))
+	firstPath, err := ApprovalOutputPath(reportPath)
+	if err != nil || firstPath != reportPath+".approval.json" {
+		t.Fatalf("first approval path = %q, err = %v", firstPath, err)
+	}
+	if err = CreateApproval(reportPath, firstPath, "GO", "qa", "first"); err != nil {
+		t.Fatal(err)
+	}
+	write("release-b", strings.Repeat("b", 64))
+	secondPath, err := ApprovalOutputPath(reportPath)
+	if err != nil || secondPath == firstPath {
+		t.Fatalf("replacement approval path = %q, err = %v", secondPath, err)
+	}
+	if err = CreateApproval(reportPath, secondPath, "GO", "qa", "second"); err != nil {
+		t.Fatal(err)
+	}
+	approval, _, err := LoadBoundApproval(reportPath)
+	if err != nil || approval.ReleaseID != "release-b" || approval.Note != "second" {
+		t.Fatalf("bound approval = %+v, err = %v", approval, err)
+	}
+	if _, err = os.Stat(firstPath); err != nil {
+		t.Fatalf("first approval was not retained: %v", err)
+	}
+}
+
 func TestEnvironmentAndComposeConfigurationChecks(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, value string) string {
