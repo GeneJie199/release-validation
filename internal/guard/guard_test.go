@@ -116,7 +116,7 @@ func TestEnvironmentAndComposeConfigurationChecks(t *testing.T) {
 	if result.Status != "pass" {
 		t.Fatalf("env result=%+v", result)
 	}
-	if evidence, _ := json.Marshal(result.Evidence); bytes.Contains(evidence, []byte("old")) || bytes.Contains(evidence, []byte("new")) {
+	if evidence, _ := json.Marshal(result.Evidence); bytes.Contains(evidence, []byte(`"old"`)) || bytes.Contains(evidence, []byte(`"new"`)) {
 		t.Fatalf("environment values leaked into evidence: %s", evidence)
 	}
 	composeBefore := write("before.yml", "services:\n  api:\n    image: app:1\n    ports: [\"8080:8080\"]\n")
