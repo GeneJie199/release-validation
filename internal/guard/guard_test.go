@@ -251,6 +251,55 @@ func TestFleetReadsSnakeCaseFreshnessAndHealth(t *testing.T) {
 	}
 }
 
+func TestSQLCheckRejectsMultipleStatementsBeforeOpeningDatabase(t *testing.T) {
+	result := Result{Evidence: map[string]any{}}
+	err := sqlCheck(context.Background(), Check{Type: "sql", Driver: "postgres", DSNEnv: "MISSING_DSN", Query: "SELECT 1; DROP TABLE releases"}, &result)
+	if err == nil || !strings.Contains(err.Error(), "exactly one statement") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestGitRefCheckResolvesWithoutShell(t *testing.T) {
+	repository := t.TempDir()
+	command := exec.Command("git", "init", "-q")
+	command.Dir = repository
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "README.md"), []byte("# release candidate\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"config", "user.name", "releaseguard-test"}, {"config", "user.email", "releaseguard-test@example.invalid"}, {"add", "README.md"}, {"commit", "-qm", "initial release candidate"}} {
+		command = exec.Command("git", args...)
+		command.Dir = repository
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	result := Result{Evidence: map[string]any{}}
+	if err := gitRefCheck(context.Background(), Check{Type: "git-ref", Ref: "HEAD", WorkingDir: repository}, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Evidence["commit"].(string)) < 40 {
+		t.Fatalf("evidence=%v", result.Evidence)
+	}
+}
+
+func TestFleetReportsMalformedNodeResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/alerts" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"summary":`))
+	}))
+	defer server.Close()
+	evidence, result := checkFleet(context.Background(), FleetPolicy{CenterURL: server.URL, Nodes: []string{"node-1"}}, "1.2.3")
+	if result.Status != "fail" || len(evidence.Nodes) != 1 || evidence.Nodes[0].Health != "invalid_response" {
+		t.Fatalf("result=%+v evidence=%+v", result, evidence)
+	}
+}
+
 func TestApprovalCannotRelaxAutomatedDecision(t *testing.T) {
 	dir := t.TempDir()
 	reportPath := filepath.Join(dir, "report.json")

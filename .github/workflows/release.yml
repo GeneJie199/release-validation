@@ -72,7 +72,8 @@ jobs:
           go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "${BINARY}" ./cmd/releaseguard
           mkdir "${STAGE}"
           cp "${BINARY}" "${STAGE}/releaseguard${{ matrix.ext }}"
-          cp README.md LICENSE scripts/install.sh "${STAGE}/"
+          cp README.md CHANGELOG.md LICENSE SECURITY.md release-plan.example.json "${STAGE}/"
+          cp -R deploy docs examples scripts "${STAGE}/"
           if [ "${GOOS}" = windows ]; then
             zip -qr "${STAGE}.zip" "${STAGE}"
           else

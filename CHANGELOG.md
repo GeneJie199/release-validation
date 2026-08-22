@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 - 2026-08-23
+
+- Add `lifecycle-spec/expected-changes/v1` declarations with release/version and SHA-256 binding, exact InfraScout/database/Fleet/topology correlation, required/optional coverage, and unexpected-change blocking.
+- Link expected changes to named validation checks, metric policies, and affected Fleet nodes; require explicit database verification links and reject migration files without a database declaration.
+- Add FleetScope release-scoped change collection, topology evidence, deterministic remediation guidance, and decision-console workflow coverage.
+- Add an offline Lucide stage flow, expected-versus-observed change views, prioritized next actions, and revised desktop/mobile decision UX.
+- Add `releaseguard init`, `releaseguard doctor`, safe `git-ref` checks, browser opening, hardened SQL single-statement validation, malformed Fleet response reporting, and cross-site approval protection.
+- Add Linux/macOS and Windows install/doctor/uninstall/purge scripts plus complete release archives and updated cross-platform CI gates.
+
 ## 0.3.2 - 2026-08-13
 
 - Replace the dead-end missing-report overlay with localized recovery actions for retry, persisted run history, and DevCycle handoff.

@@ -22,7 +22,15 @@ jobs:
       - run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
       - run: go build -trimpath -o releaseguard ./cmd/releaseguard
-      - run: ./releaseguard version
+      - name: CLI and installer smoke
+        run: |
+          ./releaseguard version
+          ./releaseguard init --help
+          ./releaseguard doctor --help
+          ./releaseguard serve --help
+          sh -n scripts/install.sh
+          test -s internal/web/static/vendor/lucide.min.js
+          for path in README.md CHANGELOG.md LICENSE SECURITY.md release-plan.example.json deploy docs examples scripts; do test -e "$path"; done
 
   platform-test:
     strategy:
@@ -39,3 +47,10 @@ jobs:
       - run: go test -timeout 120s ./...
       - run: go vet ./...
       - run: go build -trimpath -o releaseguard ./cmd/releaseguard
+      - name: Verify Windows installer syntax
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/install.ps1'), [ref]$null, [ref]$errors)
+          if ($errors.Count) { $errors | Format-List; exit 1 }

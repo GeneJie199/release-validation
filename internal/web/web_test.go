@@ -91,7 +91,7 @@ func TestHandlerServesReportApprovalAndSecurityHeaders(t *testing.T) {
 	srv := httptest.NewServer(Handler(report))
 	defer srv.Close()
 
-	for _, path := range []string{"/", "/app.js", "/style.css", "/suite.js", "/api/v1/health", "/api/v1/capabilities", "/api/v1/report", "/api/v1/approval"} {
+	for _, path := range []string{"/", "/app.js", "/style.css", "/suite.js", "/vendor/lucide.min.js", "/api/v1/health", "/api/v1/capabilities", "/api/v1/report", "/api/v1/approval"} {
 		res, err := http.Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)
@@ -116,6 +116,31 @@ func TestHandlerServesReportApprovalAndSecurityHeaders(t *testing.T) {
 	}
 	if res.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("cache control = %q", res.Header.Get("Cache-Control"))
+	}
+}
+
+func TestApprovalRejectsCrossSiteBrowserMutation(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "report.json")
+	report := guard.Report{SchemaVersion: "releaseguard.report/v1", ReleaseID: "release-cross-site", Decision: "GO", PlanSHA256: strings.Repeat("a", 64)}
+	raw, _ := json.Marshal(report)
+	if err := os.WriteFile(reportPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(HandlerWithApprovalToken(reportPath, "long-enough-test-approval-token"))
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/approval", strings.NewReader(`{"decision":"GO","approved_by":"qa"}`))
+	request.Header.Set("Authorization", "Bearer long-enough-test-approval-token")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://attacker.invalid")
+	request.Header.Set("Sec-Fetch-Site", "cross-site")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-site approval status=%d", response.StatusCode)
 	}
 }
 

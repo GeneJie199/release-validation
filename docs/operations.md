@@ -6,6 +6,7 @@ ReleaseGuard is a resumable release validation runner with an optional local dec
 
 ```bash
 releaseguard check --plan release-plan.json --state releaseguard-runs.db --out release-report.json
+releaseguard doctor --report release-report.json --state releaseguard-runs.db
 releaseguard runs --state releaseguard-runs.db
 releaseguard confirm --report release-report.json --decision GO --by release-manager --note "reviewed"
 releaseguard serve --report release-report.json --state releaseguard-runs.db --addr 127.0.0.1:8771
@@ -31,7 +32,7 @@ Exit behavior:
 - Git base/target commit manifest and unexpected sensitive file changes
 - command, HTTP, file digest, JSON, SQL, `.env`, and Compose checks
 - mandatory recovery checks for previous artifacts, backups, restore connectivity, or rollback tooling
-- InfraScout drift with explicit stable-ID allowlisting
+- versioned Expected Changes with SHA-256 identity, exact InfraScout/database/Fleet/topology matching, verification/metric/node links, and unexpected-change evidence
 - FleetScope node health, freshness, version labels, open critical alerts, and observation samples
 - FleetScope native metric baselines and post-release regression comparisons
 
@@ -47,7 +48,7 @@ An interrupted run stays active so the same plan can resume it. When recovery is
 releaseguard runs --state releaseguard-runs.db --abandon RUN_ID --reason "change window closed"
 ```
 
-Environment and Compose comparisons record changed key names, never the values. SQL credentials are read only from the environment variable named in `dsn_env`; queries run inside read-only transactions and values are omitted unless `include_sql_preview` is explicitly enabled. Still use a database account that cannot write.
+Environment and Compose comparisons record changed key names, never the values. SQL credentials are read only from the environment variable named in `dsn_env`; queries are restricted to one read-only statement, run inside read-only transactions, and omit values unless `include_sql_preview` is explicitly enabled. Still use a database account that cannot write.
 
 ## Report viewer
 
@@ -57,7 +58,7 @@ The viewer defaults to loopback. Use an SSH tunnel for remote review:
 ssh -L 8771:127.0.0.1:8771 release@host
 ```
 
-`--allow-remote` is available only for an authenticated reverse proxy and restrictive network policy. Reports contain file names, commit subjects, node IDs, and operational evidence.
+`--allow-remote` is available only for an authenticated TLS reverse proxy and restrictive network policy. ReleaseGuard prints a startup warning because it does not provide built-in TLS or viewer authentication. Reports contain file names, commit subjects, node IDs, and operational evidence.
 
 To allow a human reviewer to create the one immutable approval artifact from the Web UI, set a long random token for the service process:
 

@@ -27,6 +27,10 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "init":
+		initialize(os.Args[2:])
+	case "doctor":
+		doctor(os.Args[2:])
 	case "check":
 		check(os.Args[2:])
 	case "serve":
@@ -43,7 +47,7 @@ func main() {
 	}
 }
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: releaseguard check --plan release-plan.json [--out report.json] [--state releaseguard-runs.db] [--force]\n       releaseguard runs [--state releaseguard-runs.db] [--limit 100] [--abandon RUN_ID --reason TEXT]\n       releaseguard confirm --report report.json --decision GO --by NAME [--state releaseguard-runs.db] [--out approval.json]\n       releaseguard serve --report report.json [--state releaseguard-runs.db] [--addr 127.0.0.1:8771] [--allow-remote]")
+	fmt.Fprintln(os.Stderr, "Usage: releaseguard init [--repository .] [--version VERSION] [--out release-plan.json]\n       releaseguard check --plan release-plan.json [--out report.json] [--state releaseguard-runs.db] [--force]\n       releaseguard doctor [--report release-report.json] [--state releaseguard-runs.db] [--url http://127.0.0.1:8771]\n       releaseguard runs [--state releaseguard-runs.db] [--limit 100] [--abandon RUN_ID --reason TEXT]\n       releaseguard confirm --report release-report.json --decision GO --by NAME [--state releaseguard-runs.db] [--out approval.json]\n       releaseguard serve --report release-report.json [--state releaseguard-runs.db] [--addr 127.0.0.1:8771] [--open] [--allow-remote]")
 }
 
 func runs(args []string) {
@@ -268,10 +272,17 @@ func serve(args []string) {
 	report := f.String("report", "release-report.json", "report JSON")
 	addr := f.String("addr", "127.0.0.1:8771", "listen address")
 	allowRemote := f.Bool("allow-remote", false, "allow binding to a non-loopback address")
+	open := f.Bool("open", false, "open the decision console in the default browser")
 	statePath := f.String("state", "releaseguard-runs.db", "persistent run database for live status (empty disables)")
 	_ = f.Parse(args)
+	if *allowRemote {
+		log.Print("WARNING: remote report serving has no built-in TLS or viewer authentication; use only behind an authenticated TLS reverse proxy and restrictive network policy")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *open {
+		go openWhenReady(ctx, "http://"+*addr+"/api/v1/health", "http://"+*addr+"/")
+	}
 	if e := webui.ServeWithState(ctx, *addr, *report, *allowRemote, os.Getenv("RELEASEGUARD_APPROVAL_TOKEN"), *statePath); e != nil {
 		log.Fatal(e)
 	}

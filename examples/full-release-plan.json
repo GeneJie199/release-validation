@@ -5,6 +5,7 @@
   "repository": ".",
   "base_ref": "v1.3.0",
   "target_ref": "HEAD",
+  "expected_changes_file": "expected-changes.example.json",
   "expected_files": [
     "cmd/**",
     "internal/**",
@@ -25,7 +26,6 @@
     {"name": "database smoke", "type": "sql", "driver": "postgres", "dsn_env": "RELEASEGUARD_DATABASE_DSN", "query": "SELECT 1", "timeout_seconds": 5}
   ],
   "drift_file": "drift.json",
-  "expected_drifts": ["service:docker:host-01/orders-api", "endpoint:host-01/tcp/*/8080"],
   "fleet": {
     "center_url": "https://fleet.example.internal:8770",
     "token_env": "FLEET_TOKEN",

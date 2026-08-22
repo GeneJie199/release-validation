@@ -136,6 +136,10 @@ func handler(reportPath, approvalToken string, runs *runstore.Store) http.Handle
 		write(w, approval)
 	})
 	mux.HandleFunc("POST /api/v1/approval", func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") || (r.Header.Get("Origin") != "" && r.Header.Get("X-ReleaseGuard-Request") != "console") {
+			http.Error(w, "cross-site approval request rejected", http.StatusForbidden)
+			return
+		}
 		if approvalToken == "" {
 			http.Error(w, "approval writing is disabled", http.StatusMethodNotAllowed)
 			return

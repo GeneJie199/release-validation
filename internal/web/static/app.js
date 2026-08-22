@@ -6,12 +6,13 @@
 	const list = (value) => Array.isArray(value) ? value : [];
 	const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 	const precise = (value) => Number.isFinite(Number(value)) ? Number(value).toPrecision(5) : "-";
+	const renderIcons = () => window.lucide?.createIcons({ attrs: { "aria-hidden": "true" } });
   const fmtDate = (value) => {
     const parsed = new Date(value);
     return Number.isNaN(parsed.valueOf()) ? "-" : parsed.toLocaleString("zh-CN", { hour12: false });
   };
   const empty = (message) => `<div class="empty">${esc(message)}</div>`;
-  const phaseNames = { plan: "计划", recovery: "恢复", delivery: "交付物", verification: "验证", infrastructure: "基础设施", observation: "观测", internal: "内部" };
+  const phaseNames = { plan: "计划", recovery: "恢复", delivery: "交付物", verification: "验证", infrastructure: "基础设施", changes: "变化关联", observation: "观测", internal: "内部" };
   const summaryText = (value) => {
     const text = String(value || "");
     const exact = {
@@ -30,6 +31,12 @@
     if (match) return `${match[1]} 个节点均上报预期版本`;
     match = text.match(/^(\d+)-second observation window passed with (\d+) samples$/);
     if (match) return `${match[1]} 秒观察窗口通过，共 ${match[2]} 个样本`;
+    match = text.match(/^all (\d+) expected changes matched with no unexpected changes$/);
+    if (match) return `${match[1]} 项预期变化全部匹配，没有额外变化`;
+    match = text.match(/^(\d+) required changes missing and (\d+) observed changes unexpected$/);
+    if (match) return `缺少 ${match[1]} 项必须变化，另有 ${match[2]} 项未声明变化`;
+    match = text.match(/^(\d+) versioned expected changes loaded$/);
+    if (match) return `已载入 ${match[1]} 项版本化预期变化`;
     return text;
   };
   const decisionReasonText = (value) => {
@@ -70,7 +77,7 @@
     const response = await fetch(path, {
       method: "POST",
       cache: "no-store",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "X-ReleaseGuard-Request": "console" },
       body: JSON.stringify(body),
     });
     if (!response.ok) {
@@ -95,6 +102,63 @@
     }
     $("#candidate").innerHTML = `<dl class="kv"><dt>需求</dt><dd>${esc(candidate.requirement_title || candidate.requirement_id)}</dd><dt>验收标准</dt><dd>${number(candidate.criteria_satisfied)}/${number(candidate.criteria_total)}</dd><dt>有证据标准</dt><dd>${number(candidate.criteria_with_evidence)}/${number(candidate.criteria_total)}</dd><dt>开发任务</dt><dd>${number(candidate.tasks_done)}/${number(candidate.tasks_total)}</dd><dt>代码来源</dt><dd>${number(candidate.sources_clean)}/${number(candidate.sources_total)} 干净且钉住</dd><dt>候选状态</dt><dd><span class="state ${candidate.ready ? "pass" : "fail"}">${candidate.ready ? "已就绪" : "未就绪"}</span></dd></dl>`;
   }
+
+	function renderReleaseFlow(data) {
+		const results = list(data.results);
+		const stateFor = (phases) => {
+			const scoped = results.filter((item) => phases.includes(item.phase));
+			if (scoped.some((item) => item.status === "fail" && item.required)) return "fail";
+			if (scoped.some((item) => item.status === "fail")) return "hold";
+			return scoped.length ? "pass" : "neutral";
+		};
+		const candidate = data.manifest?.candidate;
+		const changeCoverage = data.manifest?.changes;
+		const observationState = data.observation?.status === "observing" ? "pending" : stateFor(["observation"]);
+		const stages = [
+			["候选", candidate ? (candidate.ready ? "pass" : "fail") : stateFor(["delivery"]), candidate ? `${number(candidate.criteria_satisfied)}/${number(candidate.criteria_total)} 验收` : "交付物检查"],
+			["预检", stateFor(["recovery", "verification", "infrastructure"]), "恢复与验证"],
+			["变化", changeCoverage ? (changeCoverage.missing_required || changeCoverage.unexpected_total ? "fail" : changeCoverage.correlations?.length ? "pass" : "pending") : "neutral", changeCoverage ? `${number(changeCoverage.matched_total)}/${number(changeCoverage.expected_total)} 匹配` : "未声明"],
+			["观察", observationState, data.observation?.status === "observing" ? "采样中" : data.manifest?.fleet_after ? "已完成" : "按计划"],
+			["报告", String(data.decision || "").toLowerCase() === "go" ? "pass" : String(data.decision || "").toLowerCase() === "hold" ? "hold" : "fail", data.decision || "待生成"],
+		];
+		const icon = (state) => state === "pass" ? "check" : state === "fail" ? "x" : state === "hold" ? "pause" : state === "pending" ? "loader-circle" : "minus";
+		$("#release-flow").innerHTML = stages.map(([label, state, detail], index) => `<div class="flow-stage ${state}"><span><i data-lucide="${icon(state)}"></i></span><div><b>${esc(label)}</b><small>${esc(detail)}</small></div>${index < stages.length - 1 ? '<i class="flow-arrow" data-lucide="chevron-right"></i>' : ""}</div>`).join("");
+	}
+
+	function renderChangeCoverage(coverage) {
+		if (!coverage) {
+			$("#change-document").textContent = "未配置版本化预期变化";
+			$("#change-coverage-stats").innerHTML = "";
+			$("#change-correlations").innerHTML = empty("计划没有 Expected Changes 文档，旧版漂移门禁仍按原规则执行。");
+			$("#unexpected-changes").innerHTML = empty("没有统一变化证据。");
+			return;
+		}
+		$("#change-document").textContent = `${coverage.spec || "expected-changes"} · SHA256 ${String(coverage.document_sha256 || "").slice(0, 12)}`;
+		$("#change-coverage-stats").innerHTML = [[number(coverage.expected_total), "已声明"], [number(coverage.matched_total), "已匹配"], [number(coverage.missing_required), "必须缺失"], [number(coverage.unexpected_total), "额外变化"]].map(([value, label], index) => `<div class="metric ${index > 1 && value ? "danger" : ""}"><span>${label}</span><b>${value}</b></div>`).join("");
+		const correlationByID = new Map(list(coverage.correlations).map((item) => [item.expected_id, item]));
+		const observedByID = new Map(list(coverage.observed).map((item) => [item.id, item]));
+		const statusNames = { matched: "已匹配", missing: "必须缺失", "optional-missing": "可选未发生", ambiguous: "匹配歧义" };
+		const actionNames = { added: "新增", removed: "移除", changed: "变更" };
+		$("#change-correlations").innerHTML = list(coverage.declared).length ? list(coverage.declared).map((item) => {
+			const correlation = correlationByID.get(item.id) || { status: "pending" };
+			const observed = observedByID.get(correlation.observed_id);
+			const links = [...list(item.evidence_ids).map((name) => `证据 · ${name}`), ...list(item.verification_checks).map((name) => `检查 · ${name}`), ...list(item.metric_policies).map((name) => `指标 · ${name}`), ...list(item.affected_nodes).map((name) => `节点 · ${name}`)];
+			return `<article class="change-item ${esc(correlation.status)}"><div><span class="state ${correlation.status === "matched" ? "pass" : correlation.status === "optional-missing" ? "hold" : "fail"}">${esc(statusNames[correlation.status] || "待关联")}</span><span class="source-badge">${esc(item.source)}</span></div><b>${esc(item.summary)}</b><code>${esc(actionNames[item.action] || item.action)} · ${esc(item.resource_id)}</code>${links.length ? `<p>${links.map((link) => `<span class="link-chip">${esc(link)}</span>`).join("")}</p>` : ""}${observed ? `<small>实际证据：${esc(observed.id)} · ${esc(observed.classification || "observed")}</small>` : ""}</article>`;
+		}).join("") : empty("声明文件中没有变化。");
+		$("#unexpected-changes").innerHTML = list(coverage.unexpected).length ? list(coverage.unexpected).map((item) => `<article class="change-item unexpected"><div><span class="state fail">未声明</span><span class="source-badge">${esc(item.source)}</span></div><b>${esc(item.summary || item.resource_id)}</b><code>${esc(actionNames[item.action] || item.action)} · ${esc(item.resource_id)}</code><small>${esc(item.node_id || item.resource_type || item.id)}</small></article>`).join("") : empty("未发现声明之外的基础设施、数据库、Fleet 或拓扑变化。");
+	}
+
+	function renderGuidance(items) {
+		const titles = { "approval.review": "完成人工发布决策", "optional.review": "复核可选门禁", "observed-change.unexpected": "调查未声明变化" };
+		const priority = { blocking: "阻断", review: "复核", next: "下一步" };
+		$("#guidance").innerHTML = list(items).length ? list(items).map((item) => {
+			let summary = item.summary || "";
+			if (String(item.code).startsWith("expected-change.")) summary = `核对 ${list(item.related_ids).join("、")} 的部署证据或修正版本化声明，然后重新生成报告。`;
+			if (item.code === "observed-change.unexpected") summary = `调查 ${list(item.related_ids).join("、")}，确认来源后移除漂移或补充经过评审的声明。`;
+			if (item.code === "approval.review") summary = "核对当前报告摘要、变化覆盖、观察证据和回滚前提后，再写入不可变人工决策。";
+			return `<article class="guidance-item ${esc(item.priority)}"><span><i data-lucide="${item.priority === "blocking" ? "circle-alert" : item.priority === "next" ? "arrow-right" : "search"}"></i></span><div><small>${esc(priority[item.priority] || item.priority)}</small><b>${esc(titles[item.code] || item.title)}</b><p>${esc(summaryText(summary))}</p></div></article>`;
+		}).join("") : empty("当前报告没有额外处理项。");
+	}
 
   function renderChecks() {
     const filter = $("#check-filter").value;
@@ -214,11 +278,13 @@
   function setReportLock(approval) {
     if (approval) {
       $("#report-lock").classList.add("bound");
-      $("#report-lock").innerHTML = `<span class="lock-icon" aria-hidden="true">✓</span><span><b>报告与人工决策已绑定</b><small>Approval SHA256 ${esc(approval.report_sha256)}</small></span>`;
+	  $("#report-lock").innerHTML = `<span class="lock-icon" aria-hidden="true"><i data-lucide="shield-check"></i></span><span><b>报告与人工决策已绑定</b><small>Approval SHA256 ${esc(approval.report_sha256)}</small></span>`;
+	  renderIcons();
       return;
     }
     $("#report-lock").classList.remove("bound");
-    $("#report-lock").innerHTML = `<span class="lock-icon" aria-hidden="true">#</span><span><b>计划内容指纹已记录</b><small>Plan SHA256 ${esc(report.plan_sha256 || "未提供")}</small></span>`;
+	$("#report-lock").innerHTML = `<span class="lock-icon" aria-hidden="true"><i data-lucide="fingerprint"></i></span><span><b>计划内容指纹已记录</b><small>Plan SHA256 ${esc(report.plan_sha256 || "未提供")}</small></span>`;
+	renderIcons();
   }
 
   async function renderApproval() {
@@ -251,17 +317,19 @@
     decision.textContent = data.decision || "UNKNOWN";
     decision.className = String(data.decision || "unknown").toLowerCase();
     $("#generated").textContent = `生成于 ${fmtDate(data.generated_at)}`;
+	renderReleaseFlow(data);
 	const results = list(data.results);
     const passed = results.filter((result) => result.status === "pass").length;
     const required = results.filter((result) => result.required).length;
 	$("#metrics").innerHTML = [[data.version || "-", "版本"], [`${passed}/${results.length}`, "检查通过"], [required, "必须门禁"], [list(data.manifest?.git?.commits).length, "包含提交"]].map(([value, label]) => `<div class="metric"><span>${label}</span><b>${esc(value)}</b></div>`).join("");
     $("#reason").textContent = decisionReasonText(data.decision_reason) || (data.decision === "GO" ? "全部必须门禁已通过。" : "存在未通过的必须门禁，请进入门禁结果处理。");
     $("#reason").classList.toggle("fail", data.decision !== "GO");
-    $("#decision-actions").innerHTML = data.decision === "GO" ? `<span class="eyebrow">建议动作</span><h3>完成人工批准</h3><p>自动门禁已通过。核对变更、观察窗口和回滚步骤后写入人工决策。</p><button type="button" data-jump="rollback">前往批准</button>` : `<span class="eyebrow">阻断动作</span><h3>处理失败门禁</h3><p>发布当前不可继续。先查看失败证据并修复，再生成一份新报告。</p><button type="button" data-jump="checks" data-set-filter="fail">查看失败项</button>`;
+    $("#decision-actions").innerHTML = data.decision === "GO" ? `<span class="eyebrow">建议动作</span><h3>完成人工批准</h3><p>自动门禁已通过。核对变更、观察窗口和回滚步骤后写入人工决策。</p><button class="command-with-icon" type="button" data-jump="rollback"><i data-lucide="shield-check"></i>前往批准</button>` : `<span class="eyebrow">阻断动作</span><h3>处理失败门禁</h3><p>发布当前不可继续。先查看失败证据并修复，再生成一份新报告。</p><button class="command-with-icon" type="button" data-jump="checks" data-set-filter="fail"><i data-lucide="circle-alert"></i>查看失败项</button>`;
     renderCandidate(data.manifest?.candidate);
     $("#integrity").innerHTML = `<dl class="kv"><dt>报告 Schema</dt><dd>${esc(data.schema_version || "未提供")}</dd><dt>计划 SHA256</dt><dd class="hash">${esc(data.plan_sha256 || "未提供")}</dd><dt>清单生成时间</dt><dd>${fmtDate(data.manifest?.created_at)}</dd><dt>最终决策</dt><dd>独立批准文件</dd></dl>`;
     setReportLock();
     renderChecks();
+    renderChangeCoverage(data.manifest?.changes);
     renderGit(data.manifest?.git);
     const fleetSource = data.manifest?.fleet_after ? "after" : data.manifest?.fleet_before ? "before" : "";
     renderFleet(data.manifest?.fleet_after || data.manifest?.fleet_before, fleetSource);
@@ -269,8 +337,10 @@
     renderObservation();
 	const rollback = list(data.rollback);
 	$("#rollback-list").innerHTML = rollback.length ? rollback.map((step) => `<li>${esc(step)}</li>`).join("") : `<li>报告未提供回滚步骤，发布前必须补齐。</li>`;
+	renderGuidance(data.guidance);
     renderApproval();
     $("#export-json").disabled = false;
+	renderIcons();
 	clearTimeout(liveTimer);
 	if (data.observation?.status === "observing" && !document.hidden) liveTimer = setTimeout(refreshLiveReport, 5000);
 	} catch (error) {
@@ -288,10 +358,12 @@
 			if (nextReport.observation?.status === "observing") {
 				report = nextReport;
 				$("#generated").textContent = `更新于 ${fmtDate(nextReport.generated_at)}`;
+				renderReleaseFlow(nextReport);
 				renderObservation();
 				renderMetricComparisons(nextReport.manifest?.metrics || []);
 				const source = nextReport.manifest?.fleet_after ? "after" : nextReport.manifest?.fleet_before ? "before" : "";
 				renderFleet(nextReport.manifest?.fleet_after || nextReport.manifest?.fleet_before, source);
+				renderIcons();
 				liveTimer = setTimeout(refreshLiveReport, 5000);
 			} else {
 				render(nextReport);
@@ -321,6 +393,7 @@
   async function submitApproval(form) {
     const button = form.querySelector('button[type="submit"]');
     const formData = new FormData(form);
+	if (window.matchMedia("(max-width: 700px)").matches && !window.confirm(`确认写入 ${formData.get("decision")} 决策？写入后不可覆盖。`)) return;
     button.disabled = true;
     button.textContent = "正在绑定决策…";
     try {
@@ -340,7 +413,7 @@
 		return;
 	  }
       button.disabled = false;
-      button.textContent = "写入不可变决策";
+		button.textContent = "写入不可变决策";
       notify(`批准失败：${error.message}`);
     }
   }
@@ -421,5 +494,6 @@
 		clearTimeout(liveTimer);
 		if (!document.hidden && report?.observation?.status === "observing") refreshLiveReport();
 	});
+  renderIcons();
   load();
 })();

@@ -279,8 +279,12 @@ func checkFleet(ctx context.Context, p FleetPolicy, releaseVersion string) (*Fle
 			e.Nodes = append(e.Nodes, NodeEvidence{NodeID: id, Health: "unreachable", ExpectedVersion: releaseVersion})
 			continue
 		}
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-		resp.Body.Close()
+		b, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			e.Nodes = append(e.Nodes, NodeEvidence{NodeID: id, Health: "invalid_response", ExpectedVersion: releaseVersion})
+			continue
+		}
 		if resp.StatusCode != 200 {
 			e.Nodes = append(e.Nodes, NodeEvidence{NodeID: id, Health: "unreachable", ExpectedVersion: releaseVersion})
 			continue
@@ -294,7 +298,10 @@ func checkFleet(ctx context.Context, p FleetPolicy, releaseVersion string) (*Fle
 				Labels map[string]string `json:"labels"`
 			} `json:"report"`
 		}
-		_ = json.Unmarshal(b, &x)
+		if err := json.Unmarshal(b, &x); err != nil {
+			e.Nodes = append(e.Nodes, NodeEvidence{NodeID: id, Health: "invalid_response", ExpectedVersion: releaseVersion})
+			continue
+		}
 		want := p.ExpectedVersions[id]
 		if want == "" {
 			want = releaseVersion

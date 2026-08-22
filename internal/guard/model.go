@@ -3,22 +3,23 @@ package guard
 import "time"
 
 type Plan struct {
-	ReleaseID      string            `json:"release_id"`
-	Version        string            `json:"version"`
-	CandidateFile  string            `json:"candidate_file,omitempty"`
-	Repository     string            `json:"repository,omitempty"`
-	BaseRef        string            `json:"base_ref,omitempty"`
-	TargetRef      string            `json:"target_ref,omitempty"`
-	ExpectedFiles  []string          `json:"expected_files,omitempty"`
-	Checks         []Check           `json:"checks"`
-	DriftFile      string            `json:"drift_file,omitempty"`
-	ExpectedDrifts []string          `json:"expected_drifts,omitempty"`
-	Fleet          *FleetPolicy      `json:"fleet,omitempty"`
-	Observation    *ObservationPlan  `json:"observation,omitempty"`
-	Metrics        []MetricPolicy    `json:"metrics,omitempty"`
-	RecoveryChecks []Check           `json:"recovery_checks"`
-	Rollback       []string          `json:"rollback"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+	ReleaseID           string            `json:"release_id"`
+	Version             string            `json:"version"`
+	CandidateFile       string            `json:"candidate_file,omitempty"`
+	Repository          string            `json:"repository,omitempty"`
+	BaseRef             string            `json:"base_ref,omitempty"`
+	TargetRef           string            `json:"target_ref,omitempty"`
+	ExpectedFiles       []string          `json:"expected_files,omitempty"`
+	Checks              []Check           `json:"checks"`
+	DriftFile           string            `json:"drift_file,omitempty"`
+	ExpectedDrifts      []string          `json:"expected_drifts,omitempty"`
+	ExpectedChangesFile string            `json:"expected_changes_file,omitempty"`
+	Fleet               *FleetPolicy      `json:"fleet,omitempty"`
+	Observation         *ObservationPlan  `json:"observation,omitempty"`
+	Metrics             []MetricPolicy    `json:"metrics,omitempty"`
+	RecoveryChecks      []Check           `json:"recovery_checks"`
+	Rollback            []string          `json:"rollback"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
 }
 
 type FleetPolicy struct {
@@ -60,6 +61,7 @@ type Check struct {
 	Method            string            `json:"method,omitempty"`
 	Headers           map[string]string `json:"headers,omitempty"`
 	Path              string            `json:"path,omitempty"`
+	Ref               string            `json:"ref,omitempty"`
 	BeforePath        string            `json:"before_path,omitempty"`
 	AfterPath         string            `json:"after_path,omitempty"`
 	AllowedChanges    []string          `json:"allowed_changes,omitempty"`
@@ -157,6 +159,87 @@ type MetricEvidence struct {
 	Pass              bool          `json:"pass"`
 	Summary           string        `json:"summary"`
 }
+
+type ExpectedChangeDocument struct {
+	Spec        string            `json:"spec"`
+	Kind        string            `json:"kind"`
+	ReleaseID   string            `json:"release_id"`
+	Version     string            `json:"version"`
+	GeneratedAt string            `json:"generated_at"`
+	Changes     []ExpectedChange  `json:"changes"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+type ExpectedChange struct {
+	ID                 string   `json:"id"`
+	Source             string   `json:"source"`
+	Action             string   `json:"action"`
+	ResourceID         string   `json:"resource_id"`
+	ResourceType       string   `json:"resource_type,omitempty"`
+	NodeID             string   `json:"node_id,omitempty"`
+	Fields             []string `json:"fields,omitempty"`
+	Fingerprint        string   `json:"fingerprint,omitempty"`
+	Summary            string   `json:"summary"`
+	EvidenceIDs        []string `json:"evidence_ids,omitempty"`
+	VerificationChecks []string `json:"verification_checks,omitempty"`
+	MetricPolicies     []string `json:"metric_policies,omitempty"`
+	AffectedNodes      []string `json:"affected_nodes,omitempty"`
+	Required           *bool    `json:"required,omitempty"`
+}
+
+type ObservedChange struct {
+	ID             string   `json:"id"`
+	Source         string   `json:"source"`
+	Action         string   `json:"action"`
+	ResourceID     string   `json:"resource_id"`
+	ResourceType   string   `json:"resource_type,omitempty"`
+	NodeID         string   `json:"node_id,omitempty"`
+	Fields         []string `json:"fields,omitempty"`
+	Fingerprint    string   `json:"fingerprint,omitempty"`
+	Severity       string   `json:"severity,omitempty"`
+	Summary        string   `json:"summary,omitempty"`
+	Classification string   `json:"classification,omitempty"`
+	ReleaseID      string   `json:"release_id,omitempty"`
+}
+
+type ChangeSourceEvidence struct {
+	Source         string `json:"source"`
+	ArtifactSHA256 string `json:"artifact_sha256,omitempty"`
+	CheckedAt      string `json:"checked_at"`
+	Items          int    `json:"items"`
+}
+
+type ChangeCorrelation struct {
+	ExpectedID  string   `json:"expected_id"`
+	Status      string   `json:"status"`
+	Required    bool     `json:"required"`
+	ObservedID  string   `json:"observed_id,omitempty"`
+	EvidenceIDs []string `json:"evidence_ids,omitempty"`
+	Reasons     []string `json:"reasons,omitempty"`
+}
+
+type ChangeCoverage struct {
+	Spec            string                 `json:"spec"`
+	DocumentSHA256  string                 `json:"document_sha256"`
+	Declared        []ExpectedChange       `json:"declared"`
+	Observed        []ObservedChange       `json:"observed"`
+	Sources         []ChangeSourceEvidence `json:"sources"`
+	Correlations    []ChangeCorrelation    `json:"correlations"`
+	Unexpected      []ObservedChange       `json:"unexpected"`
+	ExpectedTotal   int                    `json:"expected_total"`
+	MatchedTotal    int                    `json:"matched_total"`
+	MissingRequired int                    `json:"missing_required"`
+	MissingOptional int                    `json:"missing_optional"`
+	UnexpectedTotal int                    `json:"unexpected_total"`
+}
+
+type Guidance struct {
+	Code       string   `json:"code"`
+	Priority   string   `json:"priority"`
+	Title      string   `json:"title"`
+	Summary    string   `json:"summary"`
+	RelatedIDs []string `json:"related_ids,omitempty"`
+}
 type NodeEvidence struct {
 	NodeID          string `json:"node_id"`
 	Health          string `json:"health"`
@@ -176,6 +259,7 @@ type Manifest struct {
 	FleetBefore *FleetEvidence    `json:"fleet_before,omitempty"`
 	FleetAfter  *FleetEvidence    `json:"fleet_after,omitempty"`
 	Metrics     []MetricEvidence  `json:"metrics,omitempty"`
+	Changes     *ChangeCoverage   `json:"changes,omitempty"`
 }
 
 type Report struct {
@@ -190,6 +274,7 @@ type Report struct {
 	Results        []Result          `json:"results"`
 	Rollback       []string          `json:"rollback"`
 	Observation    *ObservationState `json:"observation,omitempty"`
+	Guidance       []Guidance        `json:"guidance,omitempty"`
 }
 
 type ObservationState struct {

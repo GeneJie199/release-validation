@@ -41,6 +41,8 @@ func runCheck(parent context.Context, c Check) Result {
 	switch c.Type {
 	case "command", "playwright":
 		err = commandCheck(ctx, c, &r)
+	case "git-ref":
+		err = gitRefCheck(ctx, c, &r)
 	case "http":
 		err = httpCheck(ctx, c, &r)
 	case "file":
@@ -64,6 +66,27 @@ func runCheck(parent context.Context, c Check) Result {
 	}
 	r.DurationMS = time.Since(start).Milliseconds()
 	return r
+}
+
+func gitRefCheck(ctx context.Context, c Check, r *Result) error {
+	if c.WorkingDir == "" {
+		return errors.New("git-ref check requires a working directory or repository")
+	}
+	command := exec.CommandContext(ctx, "git", "-C", c.WorkingDir, "rev-parse", "--verify", c.Ref+"^{commit}")
+	output, err := command.CombinedOutput()
+	if len(output) > 4096 {
+		output = output[:4096]
+	}
+	commit := strings.TrimSpace(string(output))
+	if err != nil {
+		return fmt.Errorf("git ref %q is unavailable: %s", c.Ref, commit)
+	}
+	if len(commit) != 40 && len(commit) != 64 {
+		return fmt.Errorf("git ref %q did not resolve to a full commit", c.Ref)
+	}
+	r.Evidence["ref"] = c.Ref
+	r.Evidence["commit"] = commit
+	return nil
 }
 
 func envCheck(c Check, r *Result) error {
@@ -321,6 +344,10 @@ func jsonCheck(c Check, r *Result) error {
 }
 func sqlCheck(ctx context.Context, c Check, r *Result) error {
 	q := strings.TrimSpace(c.Query)
+	statement := strings.TrimSpace(strings.TrimSuffix(q, ";"))
+	if strings.Contains(statement, ";") {
+		return errors.New("SQL validation queries must contain exactly one statement")
+	}
 	upper := strings.ToUpper(q)
 	if !strings.HasPrefix(upper, "SELECT ") && !strings.HasPrefix(upper, "SHOW ") && !strings.HasPrefix(upper, "WITH ") {
 		return errors.New("only read-only SELECT, SHOW, or WITH queries are allowed")

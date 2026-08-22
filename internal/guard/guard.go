@@ -43,6 +43,7 @@ func LoadPlan(path string) (Plan, []byte, error) {
 	p.Repository = resolve(p.Repository)
 	p.CandidateFile = resolve(p.CandidateFile)
 	p.DriftFile = resolve(p.DriftFile)
+	p.ExpectedChangesFile = resolve(p.ExpectedChangesFile)
 	resolveCheck := func(check *Check) {
 		check.Path = resolve(check.Path)
 		check.BeforePath = resolve(check.BeforePath)
@@ -85,7 +86,7 @@ func ValidatePlan(p *Plan) error {
 	if p.Repository != "" && (strings.TrimSpace(p.BaseRef) == "" || strings.TrimSpace(p.TargetRef) == "") {
 		return errors.New("base_ref and target_ref are required with repository")
 	}
-	if p.CandidateFile == "" && p.Repository == "" && len(p.Checks) == 0 && p.DriftFile == "" && p.Fleet == nil {
+	if p.CandidateFile == "" && p.Repository == "" && len(p.Checks) == 0 && p.DriftFile == "" && p.ExpectedChangesFile == "" && p.Fleet == nil {
 		return errors.New("release plan must contain at least one delivery verification surface")
 	}
 	if p.Fleet != nil {
@@ -163,7 +164,7 @@ func ValidatePlan(p *Plan) error {
 }
 
 func validateChecks(checkGroups ...[]Check) error {
-	supported := map[string]bool{"command": true, "playwright": true, "http": true, "file": true, "json": true, "sql": true, "env": true, "compose": true}
+	supported := map[string]bool{"command": true, "playwright": true, "git-ref": true, "http": true, "file": true, "json": true, "sql": true, "env": true, "compose": true}
 	seen := map[string]bool{}
 	for groupIndex, checks := range checkGroups {
 		for index := range checks {
@@ -190,6 +191,10 @@ func validateChecks(checkGroups ...[]Check) error {
 			case "command", "playwright":
 				if strings.TrimSpace(check.Command) == "" {
 					return fmt.Errorf("check %q requires command", check.Name)
+				}
+			case "git-ref":
+				if strings.TrimSpace(check.Ref) == "" {
+					return fmt.Errorf("check %q requires ref", check.Name)
 				}
 			case "http":
 				parsed, err := url.Parse(check.URL)
@@ -291,6 +296,23 @@ func RunWithProgress(ctx context.Context, p Plan, planBytes []byte, progress Pro
 			return r
 		}
 	}
+	if p.ExpectedChangesFile != "" {
+		coverage, result := loadExpectedChanges(p.ExpectedChangesFile, p.ReleaseID, p.Version)
+		result.Phase = "delivery"
+		r.Manifest.Changes = coverage
+		r.Results = append(r.Results, result)
+		if !checkpoint() {
+			return r
+		}
+		if coverage != nil {
+			linkResult := validateExpectedChangeLinks(p, coverage, gitManifest)
+			linkResult.Phase = "delivery"
+			r.Results = append(r.Results, linkResult)
+			if !checkpoint() {
+				return r
+			}
+		}
+	}
 	for _, c := range p.Checks {
 		if c.WorkingDir == "" && p.Repository != "" {
 			c.WorkingDir = p.Repository
@@ -303,7 +325,18 @@ func RunWithProgress(ctx context.Context, p Plan, planBytes []byte, progress Pro
 		}
 	}
 	if p.DriftFile != "" {
-		result := checkDrift(p.DriftFile, p.ExpectedDrifts)
+		result := Result{}
+		if r.Manifest.Changes != nil {
+			var observed []ObservedChange
+			var source ChangeSourceEvidence
+			observed, source, result = loadInfraObservedChanges(p.DriftFile)
+			if result.Status == "pass" {
+				r.Manifest.Changes.Observed = append(r.Manifest.Changes.Observed, observed...)
+				r.Manifest.Changes.Sources = append(r.Manifest.Changes.Sources, source)
+			}
+		} else {
+			result = checkDrift(p.DriftFile, p.ExpectedDrifts)
+		}
 		result.Phase = "infrastructure"
 		r.Results = append(r.Results, result)
 		if !checkpoint() {
@@ -350,6 +383,14 @@ func RunWithProgress(ctx context.Context, p Plan, planBytes []byte, progress Pro
 		}
 		r.Results = append(r.Results, result)
 	}
+	if r.Manifest.Changes != nil {
+		result := finalizeChangeCoverage(ctx, p, &r)
+		result.Phase = "changes"
+		r.Results = append(r.Results, result)
+		if !checkpoint() {
+			return r
+		}
+	}
 	decide(&r)
 	if r.Observation != nil {
 		r.Observation.Status = "completed"
@@ -378,6 +419,11 @@ func ResumeObservation(ctx context.Context, p Plan, report Report, progress Prog
 	}
 	report.Results = append(report.Results, result)
 	report.Observation.Status = "completed"
+	if report.Manifest.Changes != nil {
+		changeResult := finalizeChangeCoverage(ctx, p, &report)
+		changeResult.Phase = "changes"
+		report.Results = append(report.Results, changeResult)
+	}
 	decide(&report)
 	if err := emitProgress(progress, "completed", report); err != nil {
 		report.Results = append(report.Results, Result{Name: "persist completed run", Type: "internal", Phase: "internal", Status: "fail", Required: true, Summary: err.Error()})
@@ -395,23 +441,26 @@ func emitProgress(progress ProgressFunc, stage string, report Report) error {
 
 func decide(r *Report) {
 	failedOptional := 0
+	failedRequired := false
 	for _, x := range r.Results {
 		if x.Status == "fail" && x.Required {
 			r.Decision = "NO-GO"
 			r.DecisionReason = x.Name + ": " + x.Summary
-			return
+			failedRequired = true
+			break
 		}
 		if x.Status == "fail" {
 			failedOptional++
 		}
 	}
-	if failedOptional > 0 {
+	if !failedRequired && failedOptional > 0 {
 		r.Decision = "HOLD"
 		r.DecisionReason = fmt.Sprintf("%d optional checks need review", failedOptional)
-		return
+	} else if !failedRequired {
+		r.Decision = "GO"
+		r.DecisionReason = "all required release checks passed; final approval remains a human decision"
 	}
-	r.Decision = "GO"
-	r.DecisionReason = "all required release checks passed; final approval remains a human decision"
+	r.Guidance = buildGuidance(*r)
 }
 
 func WriteReport(path string, report Report) error { return writeJSONAtomic(path, report, false) }

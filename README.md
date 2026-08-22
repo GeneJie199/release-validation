@@ -15,7 +15,8 @@ AI DevOps Open Suite 的发布验证与证据模块。它把一份可评审 JSON
 - `env` / `compose`：比较配置结构，只在报告中记录键名，不泄露值。
 - DevCycle 发布候选重新验真：readiness、任务、标准和证据覆盖。
 - Git base/target 清单、提交、迁移/配置文件和未声明敏感改动。
-- InfraScout 漂移校验，只有显式 stable ID allowlist 内的变化可通过。
+- 版本化 Expected Changes：与发布 ID、版本及文档 SHA-256 绑定，精确关联 InfraScout、数据库、Fleet 和拓扑实际变化。
+- 变化声明可关联验证项、指标策略和受影响节点；缺失、歧义、拒绝项与额外变化都会保留结构化证据并阻断。
 - FleetScope 节点版本、健康、新鲜度、严重告警和持续观察采样。
 - FleetScope 原生时序查询、发布前基线和发布后指标回归阈值。
 - SQLite 运行检查点、中断恢复、历史运行列表和 Viewer 实时刷新。
@@ -23,16 +24,18 @@ AI DevOps Open Suite 的发布验证与证据模块。它把一份可评审 JSON
 - 强制 `recovery_checks` 验证旧制品、备份、恢复端点或回滚脚本等回滚前提；只有说明文字不能得到 `GO`。
 - 人工决策只能维持或收紧自动结论，不能把 `HOLD` / `NO-GO` 覆盖成 `GO`；活跃验证期间禁止绑定旧报告。
 - 响应式中文决策台；默认只读，可用独立 Bearer Token 启用一次性不可变 Web 批准，无 Node/CDN 运行依赖。
+- 阶段轨迹、变化覆盖、证据关联和可执行修复建议；最终批准始终只属于人。
 
 ## 快速开始
 
 ```bash
-go test ./...
 go build -trimpath -o releaseguard ./cmd/releaseguard
-./releaseguard check --plan release-plan.example.json --state releaseguard-runs.db --out release-report.json
+./releaseguard init --repository . --version 1.4.0
+./releaseguard check --plan release-plan.json --state releaseguard-runs.db --out release-report.json
 ./releaseguard runs --state releaseguard-runs.db
 ./releaseguard confirm --report release-report.json --decision GO --by "$USER" --note "reviewed"
-./releaseguard serve --report release-report.json --state releaseguard-runs.db --addr 127.0.0.1:8771
+./releaseguard serve --report release-report.json --state releaseguard-runs.db --addr 127.0.0.1:8771 --open
+./releaseguard doctor --report release-report.json --state releaseguard-runs.db --url http://127.0.0.1:8771
 ```
 
 打开 `http://127.0.0.1:8771/`。报告页面包含结论、门禁证据、Git 变更、Fleet 目标节点、回滚步骤和批准记录。
@@ -52,6 +55,8 @@ export RELEASEGUARD_APPROVAL_TOKEN='replace-with-a-long-random-token'
 
 仓库根目录的 [release-plan.example.json](release-plan.example.json) 可直接运行。包含所有集成字段的参考见 [examples/full-release-plan.json](examples/full-release-plan.json)。
 
+`releaseguard init` 会从 Git 仓库、当前版本和最近标签生成一份不可覆盖的起步计划，并按 Go、Node 或通用仓库选择第一条检查。它不会自动把真实变化批准成“预期变化”；生产发布仍应提交经过评审的 [Expected Changes 示例](examples/expected-changes.example.json)。
+
 ```json
 {
   "release_id": "orders-api-2026-08-12",
@@ -68,6 +73,31 @@ export RELEASEGUARD_APPROVAL_TOKEN='replace-with-a-long-random-token'
 ```
 
 每个 check 默认是 required；设置 `"required": false` 可把失败降为 `HOLD`。任何 required 失败都会得到 `NO-GO`。
+
+## Expected Changes
+
+Expected Changes 是发布意图与发布后事实之间的版本化合同：
+
+```json
+{
+  "spec": "lifecycle-spec/expected-changes/v1",
+  "kind": "expected-changes",
+  "release_id": "orders-api-2026-08-12",
+  "version": "1.4.0",
+  "generated_at": "2026-08-12T08:00:00Z",
+  "changes": [{
+    "id": "orders-total-column",
+    "source": "database",
+    "action": "added",
+    "resource_id": "dbmeta:column:public.orders.total_cents",
+    "resource_type": "database.column",
+    "summary": "Add the reviewed total_cents column",
+    "verification_checks": ["database smoke"]
+  }]
+}
+```
+
+`source` 支持 `infrascout`、`database`、`fleet` 和 `topology`；`action` 支持 `added`、`removed` 和 `changed`。匹配使用稳定资源 ID，可选收紧资源类型、节点、字段和指纹。数据库声明必须关联计划中的验证项；Fleet/拓扑声明必须给出 `node_id` 或 `affected_nodes`。Git 中出现迁移文件但没有数据库声明时会直接阻断。旧的 `expected_drifts` 仍可读取，但新计划应使用 `expected_changes_file`。
 
 `recovery_checks` 至少一项且全部是必须门禁，用于证明回滚所依赖的旧制品、备份、恢复连接或操作脚本真实可用。`rollback` 保留人工执行顺序，两者缺一不可。命令检查可用 `working_directory` 固定执行目录；配置仓库后未显式填写时默认在仓库根目录运行。
 
@@ -106,7 +136,9 @@ releaseguard confirm \
 ## 安全模型
 
 - 计划中的 `command` 会执行 shell，必须像部署脚本一样评审。
+- `git-ref` 检查直接调用 Git 参数接口，不经过 shell，适合作为默认回滚制品前提。
 - SQL DSN 和 Fleet Token 只从计划指定的环境变量读取。
+- SQL 检查仅接受单条只读 `SELECT`、`SHOW` 或 `WITH` 语句，并仍应使用无写权限账户。
 - `.env` / Compose 对比不记录配置值，只记录新增、删除、变化和未声明键。
 - Viewer 默认拒绝非 loopback 地址；远程查看优先使用 SSH 隧道。
 - Viewer 默认只读；仅通过进程环境变量 `RELEASEGUARD_APPROVAL_TOKEN` 配置临时 Token 后接受带 Bearer Token 的一次性批准写入，避免 Token 出现在进程参数中。HTTP 永不执行计划命令，也不能覆盖已有批准。
@@ -114,8 +146,18 @@ releaseguard confirm \
 ## 安装与运维
 
 ```bash
-sudo sh ./scripts/install.sh ./releaseguard-linux-amd64 ./checksums.txt
+sudo sh ./scripts/install.sh install ./releaseguard ./checksums.txt
+sudo sh ./scripts/install.sh doctor
+sudo sh ./scripts/install.sh uninstall
 ```
+
+Windows 当前用户安装：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Action Install -Source .\releaseguard.exe -Checksums .\checksums.txt
+```
+
+卸载默认保留报告、运行记录和批准。`purge` 需要提供精确数据目录确认，避免误删审计证据。
 
 退出码、systemd 报告服务、最小权限和证据说明见 [docs/operations.md](docs/operations.md)。
 

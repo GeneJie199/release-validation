@@ -1,0 +1,45 @@
+{
+  "spec": "lifecycle-spec/expected-changes/v1",
+  "kind": "expected-changes",
+  "release_id": "orders-api-2026-08-12",
+  "version": "1.4.0",
+  "generated_at": "2026-08-12T08:00:00Z",
+  "changes": [
+    {
+      "id": "orders-service-image",
+      "source": "infrascout",
+      "action": "changed",
+      "resource_id": "service:docker:host-01/orders-api",
+      "resource_type": "service",
+      "fields": ["image"],
+      "summary": "Deploy the reviewed orders-api 1.4.0 image",
+      "verification_checks": ["health endpoint"],
+      "metric_policies": ["API latency", "Request success rate"],
+      "affected_nodes": ["host-01"]
+    },
+    {
+      "id": "orders-total-column",
+      "source": "database",
+      "action": "added",
+      "resource_id": "dbmeta:column:public.orders.total_cents",
+      "resource_type": "database.column",
+      "summary": "Add the reviewed total_cents order column",
+      "verification_checks": ["database smoke"]
+    },
+    {
+      "id": "orders-database-dependency",
+      "source": "topology",
+      "action": "added",
+      "resource_id": "relationship:orders-api/orders-primary",
+      "resource_type": "topology.edge",
+      "node_id": "host-01",
+      "summary": "Orders API begins using the primary orders database",
+      "verification_checks": ["health endpoint"],
+      "affected_nodes": ["host-01"]
+    }
+  ],
+  "metadata": {
+    "environment": "production",
+    "owner": "orders-team"
+  }
+}
