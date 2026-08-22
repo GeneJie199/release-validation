@@ -198,6 +198,16 @@ func TestLoadPlanRejectsTrailingJSON(t *testing.T) {
 	}
 }
 
+func FuzzLoadPlan(f *testing.F) {
+	f.Add([]byte(`{"release_id":"x","version":"1","checks":[{"name":"health","type":"http","url":"https://example.test"}],"recovery_checks":[{"name":"rollback","type":"file","path":"proof"}],"rollback":["undo"]}`))
+	f.Add([]byte(`{"release_id":"x"} {}`))
+	f.Add([]byte("not-json"))
+	base := f.TempDir()
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = decodePlan(data, base)
+	})
+}
+
 func TestLoadPlanRequiresRecoveryProofAndVerificationSurface(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plan.json")
 	if err := os.WriteFile(path, []byte(`{"release_id":"x","version":"1","checks":[{"name":"health","type":"http","url":"https://example.test"}],"rollback":["undo"]}`), 0o600); err != nil {

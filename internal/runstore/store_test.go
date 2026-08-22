@@ -148,6 +148,45 @@ func TestConcurrentCreateReusesSingleActiveRun(t *testing.T) {
 	}
 }
 
+func TestTransientDatabaseLockWaitsAndRecovers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	blocker, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker.SetMaxOpenConns(1)
+	defer blocker.Close()
+	if _, err := blocker.Exec(`PRAGMA journal_mode=WAL; BEGIN IMMEDIATE;`); err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan error, 1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_, commitErr := blocker.Exec(`COMMIT;`)
+		released <- commitErr
+	}()
+	started := time.Now()
+	plan := guard.Plan{ReleaseID: "locked-release", Version: "1", Rollback: []string{"undo"}}
+	record, err := store.Create(context.Background(), plan.ReleaseID, "sha", plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commitErr := <-released; commitErr != nil {
+		t.Fatal(commitErr)
+	}
+	if waited := time.Since(started); waited < 50*time.Millisecond || waited >= 5*time.Second {
+		t.Fatalf("unexpected lock wait %s", waited)
+	}
+	if record.ReleaseID != plan.ReleaseID {
+		t.Fatalf("record after lock = %+v", record)
+	}
+}
+
 func TestLeasePreventsDuplicateExecutionAndCanBeReclaimed(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "runs.db"))
 	if err != nil {

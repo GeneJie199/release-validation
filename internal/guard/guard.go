@@ -21,19 +21,26 @@ func LoadPlan(path string) (Plan, []byte, error) {
 	if err != nil {
 		return Plan{}, nil, err
 	}
+	p, err := decodePlan(b, filepath.Dir(path))
+	if err != nil {
+		return Plan{}, nil, err
+	}
+	return p, b, nil
+}
+
+func decodePlan(b []byte, base string) (Plan, error) {
 	var p Plan
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
-	if err = d.Decode(&p); err != nil {
-		return Plan{}, nil, err
+	if err := d.Decode(&p); err != nil {
+		return Plan{}, err
 	}
-	if err = d.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+	if err := d.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return Plan{}, nil, errors.New("plan must contain one JSON object")
+			return Plan{}, errors.New("plan must contain one JSON object")
 		}
-		return Plan{}, nil, fmt.Errorf("invalid trailing plan JSON: %w", err)
+		return Plan{}, fmt.Errorf("invalid trailing plan JSON: %w", err)
 	}
-	base := filepath.Dir(path)
 	resolve := func(v string) string {
 		if v != "" && !filepath.IsAbs(v) {
 			return filepath.Clean(filepath.Join(base, v))
@@ -57,9 +64,9 @@ func LoadPlan(path string) (Plan, []byte, error) {
 		resolveCheck(&p.RecoveryChecks[i])
 	}
 	if err := ValidatePlan(&p); err != nil {
-		return Plan{}, nil, err
+		return Plan{}, err
 	}
-	return p, b, nil
+	return p, nil
 }
 
 func ValidatePlan(p *Plan) error {

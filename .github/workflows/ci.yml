@@ -21,6 +21,11 @@ jobs:
       - run: go test -race -timeout 120s ./...
       - run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - name: Security and secret scan
+        shell: bash
+        run: bash scripts/security-check.sh
+      - name: Release plan fuzz smoke
+        run: go test -parallel=2 -run='^$' -fuzz='^FuzzLoadPlan$' -fuzztime=5s ./internal/guard
       - run: go build -trimpath -o releaseguard ./cmd/releaseguard
       - name: CLI and installer smoke
         run: |
