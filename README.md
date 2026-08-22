@@ -5,7 +5,15 @@ AI DevOps Open Suite 的发布验证与证据模块。它把一份可评审 JSON
 [![CI](https://github.com/GeneJie199/release-validation/actions/workflows/ci.yml/badge.svg)](https://github.com/GeneJie199/release-validation/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-## 可交付能力
+## Screenshot
+
+![ReleaseGuard release decision console](https://raw.githubusercontent.com/GeneJie199/ai-devops-open-suite/main/assets/releaseguard-decision.png)
+
+## Why
+
+Release decisions should be repeatable and reviewable, not a collection of screenshots and remembered commands. ReleaseGuard turns a versioned plan into deterministic checks, expected-change coverage, an observation window, rollback evidence, and a report-bound human decision.
+
+## Core Features
 
 - `command` / `playwright`：运行本地测试、构建、lint 或浏览器命令。
 - `http`：校验方法、状态码、响应文本和请求头。
@@ -26,7 +34,7 @@ AI DevOps Open Suite 的发布验证与证据模块。它把一份可评审 JSON
 - 响应式中文决策台；默认只读，可用独立 Bearer Token 启用一次性不可变 Web 批准，无 Node/CDN 运行依赖。
 - 阶段轨迹、变化覆盖、证据关联和可执行修复建议；最终批准始终只属于人。
 
-## 快速开始
+## Quick Start
 
 ```bash
 go build -trimpath -o releaseguard ./cmd/releaseguard
@@ -50,6 +58,92 @@ export RELEASEGUARD_APPROVAL_TOKEN='replace-with-a-long-random-token'
 页面写入与 `confirm` 生成同一种 SHA-256 绑定批准文件；已存在的批准仍会返回冲突，不能覆盖。Token 至少 24 字符，只存在服务进程和当前浏览器表单中，不写入报告。自动验证仍在运行时，批准接口会被硬性关闭。
 
 报告和批准默认不可覆盖。重复演示时删除旧输出，或仅对明确的临时路径使用 `check --force`。
+
+## Online Install
+
+Install and start the complete Open Suite, including ReleaseGuard:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GeneJie199/ai-devops-open-suite/main/scripts/bootstrap.sh | bash
+```
+
+```powershell
+irm https://raw.githubusercontent.com/GeneJie199/ai-devops-open-suite/main/scripts/bootstrap.ps1 | iex
+```
+
+For ReleaseGuard alone, download the matching archive and `checksums.txt` from [Releases](https://github.com/GeneJie199/release-validation/releases/latest), extract them, then use the packaged installer.
+
+## Offline Install
+
+On an online machine, download the matching `releaseguard-<version>-<os>-<arch>` archive and `checksums.txt`, then move both files to the offline machine and extract the archive:
+
+```bash
+sudo sh scripts/install.sh install ./releaseguard ./checksums.txt
+sudo sh scripts/install.sh doctor
+```
+
+```powershell
+.\scripts\install.ps1 -Action Install -Source .\releaseguard.exe -Checksums .\checksums.txt
+.\scripts\install.ps1 -Action Doctor
+```
+
+The Open Suite full offline bundle includes ReleaseGuard, the other products, protocol schemas, manifests, checksums, and all installation metadata. Installation from that bundle performs no public network access.
+
+## First Five Minutes
+
+1. Run `releaseguard init --repository . --version VERSION` in the project to be released.
+2. Review `release-plan.json`, especially required checks, expected changes, observation rules, and recovery checks.
+3. Run `releaseguard check` and open the local decision console.
+4. Resolve every required failure and rerun the same stateful plan; interrupted observation resumes from its checkpoint.
+5. Record `GO`, `HOLD`, or `NO-GO` only after reviewing the report and rollback evidence.
+
+## AI Optional
+
+ReleaseGuard needs no AI provider. Every decision, check, correlation, and recommendation is produced from deterministic evidence. Its structured report can be passed to an external AI for explanation, but AI output is never accepted as a check result and cannot approve or execute a deployment.
+
+## Comparison
+
+| Tool category | Primary strength | ReleaseGuard's role |
+|---|---|---|
+| CI systems | Build and test automation | Bind verified CI-style checks to one release intent and immutable report |
+| Deployment tools | Apply infrastructure or application changes | Validate before and after deployment without deploying or switching traffic |
+| Approval systems | Organizational workflow and identity | Produce evidence and a report-bound decision artifact; it does not replace enterprise IAM |
+| Monitoring dashboards | Live operational visibility | Query FleetScope during a bounded release observation window and measure regression |
+
+## Architecture
+
+```mermaid
+flowchart LR
+  C[DevCycle candidate] --> G[ReleaseGuard engine]
+  E[Expected changes] --> G
+  I[InfraScout drift] --> G
+  F[FleetScope health and metrics] --> G
+  G --> S[SQLite checkpoint state]
+  G --> R[Immutable report]
+  R --> A[Report-bound human decision]
+```
+
+ReleaseGuard does not import another product's code or read its private database. Inputs are versioned files and documented HTTP APIs; execution checkpoints are local SQLite state, while final reports and approvals are immutable JSON artifacts.
+
+## Security
+
+- The Viewer binds to loopback by default and is read-only unless a temporary environment-only approval token is supplied.
+- Command checks are an explicit trusted-local-code boundary; HTTP, Git, file, JSON, SQL, and configuration checks use bounded parsers and clients.
+- SQL is restricted to read-only query forms and credentials come from named environment variables.
+- Reports redact configuration values and never persist Fleet tokens or database DSNs.
+- Releases include SHA-256 checksums, CycloneDX SBOM, secret scanning, fuzz checks, and GitHub provenance.
+
+See [SECURITY.md](SECURITY.md) and [docs/operations.md](docs/operations.md).
+
+## Roadmap
+
+The v1.0 boundary is deterministic release validation and evidence, not deployment automation. Policy packs, more observation adapters, and deeper external approval integrations remain on the [Open Suite roadmap](https://github.com/GeneJie199/ai-devops-open-suite/blob/main/ROADMAP.md).
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md). New check types require deterministic fixtures, timeout and redaction behavior, malformed-input coverage, resume semantics where applicable, and a documented evidence boundary.
+
+## Product Reference
 
 ## 发布计划
 
@@ -133,7 +227,7 @@ releaseguard confirm \
 
 输出默认为 `release-report.json.approval.json`，包含批准人、时间、决策和报告 SHA-256。工具的 `GO` 不等于自动上线；批准文件保持人的最终责任边界。
 
-## 安全模型
+## 安全模型细节
 
 - 计划中的 `command` 会执行 shell，必须像部署脚本一样评审。
 - `git-ref` 检查直接调用 Git 参数接口，不经过 shell，适合作为默认回滚制品前提。

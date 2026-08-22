@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0 - 2026-08-23
+
+- Deliver deterministic candidate, Git, configuration, SQL, HTTP, file, Fleet, metric-regression, observation, expected-change, and rollback-readiness gates in one checkpointed release flow.
+- Preserve immutable reports and digest-bound human decisions across interruption, process contention, database locks, and resumed observation without granting AI deployment or approval authority.
+- Add checksum-verifying install/doctor/uninstall/purge scripts, complete platform archives, external-user onboarding, fuzz/security gates, CycloneDX SBOM, and GitHub provenance.
+
 ## 0.4.0 - 2026-08-23
 
 - Add `lifecycle-spec/expected-changes/v1` declarations with release/version and SHA-256 binding, exact InfraScout/database/Fleet/topology correlation, required/optional coverage, and unexpected-change blocking.

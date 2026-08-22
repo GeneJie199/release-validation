@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   test:
@@ -35,12 +37,29 @@ jobs:
       - name: Reachable vulnerability scan
         if: matrix.os == 'ubuntu-latest'
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - name: Security and secret scan
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: bash scripts/security-check.sh
+      - name: Release plan fuzz smoke
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -parallel=2 -run='^$' -fuzz='^FuzzLoadPlan$' -fuzztime=5s ./internal/guard
       - name: Verify tag is documented
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
           grep -q "^## ${version%%-*} " CHANGELOG.md
+      - name: Verify installer syntax
+        if: matrix.os == 'ubuntu-latest'
+        run: sh -n scripts/install.sh
+      - name: Verify Windows installer syntax
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/install.ps1'), [ref]$null, [ref]$errors)
+          if ($errors.Count) { $errors | Format-List; exit 1 }
 
   build:
     needs: test
@@ -90,11 +109,24 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - run: cd dist && sha256sum releaseguard-* > checksums.txt
+      - name: SBOM and checksums
+        run: |
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 mod -licenses -json -output "dist/releaseguard-${GITHUB_REF_NAME}.cdx.json" .
+          cd dist && sha256sum releaseguard-* > checksums.txt
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/*
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
