@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -102,6 +103,21 @@ func TestHandlerServesReportApprovalAndSecurityHeaders(t *testing.T) {
 		}
 		if res.Header.Get("X-Content-Type-Options") != "nosniff" || res.Header.Get("Content-Security-Policy") == "" {
 			t.Errorf("GET %s missing security headers", path)
+		}
+	}
+
+	indexResponse, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := io.ReadAll(indexResponse.Body)
+	_ = indexResponse.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{`class="skip-link"`, `id="main-content" tabindex="-1"`, `id="decision" role="status"`, `aria-label="发布流程"`, `id="observation-announcer"`, `aria-label="套件模块"`} {
+		if !bytes.Contains(index, []byte(marker)) {
+			t.Fatalf("index page missing UI contract %q", marker)
 		}
 	}
 

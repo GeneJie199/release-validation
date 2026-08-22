@@ -122,7 +122,8 @@
 			["报告", String(data.decision || "").toLowerCase() === "go" ? "pass" : String(data.decision || "").toLowerCase() === "hold" ? "hold" : "fail", data.decision || "待生成"],
 		];
 		const icon = (state) => state === "pass" ? "check" : state === "fail" ? "x" : state === "hold" ? "pause" : state === "pending" ? "loader-circle" : "minus";
-		$("#release-flow").innerHTML = stages.map(([label, state, detail], index) => `<div class="flow-stage ${state}"><span><i data-lucide="${icon(state)}"></i></span><div><b>${esc(label)}</b><small>${esc(detail)}</small></div>${index < stages.length - 1 ? '<i class="flow-arrow" data-lucide="chevron-right"></i>' : ""}</div>`).join("");
+		const stateNames = { pass: "通过", fail: "失败", hold: "暂停", pending: "进行中", neutral: "等待" };
+		$("#release-flow").innerHTML = stages.map(([label, state, detail], index) => `<li class="flow-stage ${state}"><span aria-hidden="true"><i data-lucide="${icon(state)}"></i></span><div><b>${esc(label)}</b><span class="sr-only">状态：${stateNames[state] || state}</span><small>${esc(detail)}</small></div>${index < stages.length - 1 ? '<i class="flow-arrow" aria-hidden="true" data-lucide="chevron-right"></i>' : ""}</li>`).join("");
 	}
 
 	function renderChangeCoverage(coverage) {
@@ -207,13 +208,18 @@
 		const deadline = new Date(report.observation.deadline_at).valueOf();
 		const remaining = Number.isNaN(deadline) ? null : Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
 		$("#observation").innerHTML = `<div class="observation-head"><span class="state pending">观察中</span><strong>${remaining === null ? "等待有效截止时间" : `剩余约 ${remaining} 秒`}，已保存 ${liveSamples.length} 个样本</strong></div>${renderSamples(liveSamples)}`;
+		const message = `发布后观察进行中，已保存 ${liveSamples.length} 个样本`;
+		if ($("#observation-announcer").textContent !== message) $("#observation-announcer").textContent = message;
 		return;
 	  }
 	  $("#observation").innerHTML = empty("计划未配置发布后观察窗口。");
+	  $("#observation-announcer").textContent = "未配置发布后观察窗口";
       return;
     }
     const samples = check.evidence?.samples || [];
 	$("#observation").innerHTML = `<div class="observation-head"><span class="state ${esc(check.status)}">${check.status === "pass" ? "通过" : "失败"}</span><strong>${esc(check.summary)}</strong></div>${renderSamples(samples)}`;
+	const message = `发布后观察${check.status === "pass" ? "通过" : "失败"}：${check.summary}`;
+	if ($("#observation-announcer").textContent !== message) $("#observation-announcer").textContent = message;
   }
 
 	function renderSamples(samples) {
@@ -380,9 +386,11 @@
 		if (active) item.setAttribute("aria-current", "page"); else item.removeAttribute("aria-current");
 	});
     document.querySelectorAll(".view").forEach((item) => item.classList.toggle("active", item.id === target));
+    const heading = section.querySelector("h1");
+    document.title = `${heading?.textContent || "发布报告"} · ReleaseGuard`;
     if (updateHash) history.replaceState(null, "", `#/${target}`);
     if (target === "history") loadRuns();
-	if (updateHash) section.focus({ preventScroll: true });
+    if (updateHash && heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -393,7 +401,6 @@
   async function submitApproval(form) {
     const button = form.querySelector('button[type="submit"]');
     const formData = new FormData(form);
-	if (window.matchMedia("(max-width: 700px)").matches && !window.confirm(`确认写入 ${formData.get("decision")} 决策？写入后不可覆盖。`)) return;
     button.disabled = true;
     button.textContent = "正在绑定决策…";
     try {
