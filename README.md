@@ -75,7 +75,7 @@ For ReleaseGuard alone, download the matching archive and `checksums.txt` from [
 
 ## Offline Install
 
-On an online machine, download the matching `releaseguard-<version>-<os>-<arch>` archive and `checksums.txt`, then move both files to the offline machine and extract the archive:
+On an online machine, download the matching `releaseguard-<version>-<os>-<arch>` archive and release-level `checksums.txt`, and verify the archive before transfer. Extract it; the archive's own `checksums.txt` covers the platform-local `releaseguard` binary used below:
 
 ```bash
 sudo sh scripts/install.sh install ./releaseguard ./checksums.txt

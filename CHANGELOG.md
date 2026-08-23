@@ -5,6 +5,7 @@
 - Deliver deterministic candidate, Git, configuration, SQL, HTTP, file, Fleet, metric-regression, observation, expected-change, and rollback-readiness gates in one checkpointed release flow.
 - Preserve immutable reports and digest-bound human decisions across interruption, process contention, database locks, and resumed observation without granting AI deployment or approval authority.
 - Add checksum-verifying install/doctor/uninstall/purge scripts, complete platform archives, external-user onboarding, fuzz/security gates, CycloneDX SBOM, and GitHub provenance.
+- Include and build-verify a platform-local binary checksum inside every standalone archive.
 
 ## 0.4.0 - 2026-08-23
 

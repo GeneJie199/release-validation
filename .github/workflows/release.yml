@@ -93,6 +93,7 @@ jobs:
           cp "${BINARY}" "${STAGE}/releaseguard${{ matrix.ext }}"
           cp README.md CHANGELOG.md LICENSE SECURITY.md release-plan.example.json "${STAGE}/"
           cp -R deploy docs examples scripts "${STAGE}/"
+          (cd "${STAGE}" && sha256sum "releaseguard${{ matrix.ext }}" > checksums.txt && sha256sum -c checksums.txt)
           if [ "${GOOS}" = windows ]; then
             zip -qr "${STAGE}.zip" "${STAGE}"
           else
