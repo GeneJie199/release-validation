@@ -222,6 +222,10 @@ ReleaseGuard 计划引用 `candidate_file`、`drift_file` 和 `fleet` 后，会�
 
 使用 `candidate_file` 时必须同时配置 `repository`、`base_ref`、`target_ref`。候选的验收、任务与来源总数必须为正数且完成数一致；至少一个干净来源必须指向同一个实际仓库目录并与 Git 验证的目标提交一致。仅声明 `ready: true` 或复制提交字符串不能替代来源核验。候选中的 `repositoryPath` 应为本机可访问的绝对路径。GO 仅表示所配置的检查通过，仍需人工审核报告与证据，不授予生产部署权限。
 
+候选必须包含真实的 `acceptanceCriteria`、`tasks`、`evidence`，数量、唯一 ID、requirement/criterion/task/source 关联和完成状态均会核对。每个验收项按 `createdAt` 选择最新证据且必须通过；还需至少一项带已执行 `metadata.command` 的 `test`/`command` 机器检查证据，关联来源任务或 `metadata.workingDir`。同一命令/目录/任务的最新机器检查失败会阻断，文字成功声明不能替代机器检查。`generatedAt` 和证据时间必须在 24 小时内，未来时钟容差为 1 分钟；过期后应重新执行检查并重新导出，不能只编辑时间戳。若提供 `evidenceComplete` 或 `teamRuntime.evidenceComplete`，它们必须为 true。报告保存候选文件 SHA-256，供人工核对原始输入。
+
+该门禁验证本地导出文件的内部一致性与 Git 来源绑定，不是签名的远程证明。能篡改本机候选、证据和源仓库的人仍处于信任边界内；跨信任边界使用时，应由可信 CI 重新运行检查，并独立核验制品与来源证明。
+
 观察期间每个样本都会写入 SQLite。活动 run 使用短期租约保证同一时刻只有一个进程执行门禁；正常中断立即释放，崩溃后的租约会自动过期。以相同计划和 `--state` 再次运行 `check` 会恢复同一个 run，只执行剩余观察窗口，不重复命令门禁或基线采集。`releaseguard runs` 可查看 run ID、阶段、样本数和最终决策。
 
 确定不再恢复的中断运行可用 `releaseguard runs --state releaseguard-runs.db --abandon RUN_ID --reason "change window closed"` 审计式关闭。工具对可恢复中断返回退出码 `3`，参数错误仍使用 `2`。

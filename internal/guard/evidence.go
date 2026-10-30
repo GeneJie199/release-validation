@@ -2,6 +2,7 @@ package guard
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -24,34 +25,14 @@ func loadCandidate(path string) (*CandidateSummary, Result) {
 		r.Summary = err.Error()
 		return nil, r
 	}
-	var raw struct {
-		Spec        string `json:"spec"`
-		Requirement struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
-		} `json:"requirement"`
-		Readiness struct {
-			CriteriaTotal        int  `json:"criteriaTotal"`
-			CriteriaSatisfied    int  `json:"criteriaSatisfied"`
-			CriteriaWithEvidence int  `json:"criteriaWithEvidence"`
-			TasksTotal           int  `json:"tasksTotal"`
-			TasksDone            int  `json:"tasksDone"`
-			SourcesTotal         int  `json:"sourcesTotal"`
-			SourcesClean         int  `json:"sourcesClean"`
-			Ready                bool `json:"ready"`
-		} `json:"readiness"`
-		Sources []struct {
-			TaskID         string `json:"taskId"`
-			RepositoryPath string `json:"repositoryPath"`
-			Branch         string `json:"branch"`
-			HeadCommit     string `json:"headCommit"`
-			Clean          bool   `json:"clean"`
-		} `json:"sources"`
-	}
+	digest := sha256.Sum256(b)
+	r.Evidence["sha256"] = hex.EncodeToString(digest[:])
+	var raw candidateDocument
 	if err = json.Unmarshal(b, &raw); err != nil {
 		r.Summary = err.Error()
 		return nil, r
 	}
+	r.Evidence["generated_at"] = raw.GeneratedAt
 	c := &CandidateSummary{Spec: raw.Spec, RequirementID: raw.Requirement.ID, RequirementTitle: raw.Requirement.Title, CriteriaTotal: raw.Readiness.CriteriaTotal, CriteriaSatisfied: raw.Readiness.CriteriaSatisfied, CriteriaWithEvidence: raw.Readiness.CriteriaWithEvidence, TasksTotal: raw.Readiness.TasksTotal, TasksDone: raw.Readiness.TasksDone, SourcesTotal: raw.Readiness.SourcesTotal, SourcesClean: raw.Readiness.SourcesClean, Sources: []CandidateSourceSummary{}, Ready: raw.Readiness.Ready}
 	for _, source := range raw.Sources {
 		c.Sources = append(c.Sources, CandidateSourceSummary{TaskID: source.TaskID, RepositoryPath: source.RepositoryPath, Branch: source.Branch, HeadCommit: source.HeadCommit, Clean: source.Clean})
@@ -88,6 +69,10 @@ func loadCandidate(path string) (*CandidateSummary, Result) {
 	}
 	if clean != c.SourcesClean {
 		r.Summary = "release candidate clean source count is inconsistent"
+		return c, r
+	}
+	if err := validateCandidateDetails(raw, time.Now().UTC()); err != nil {
+		r.Summary = err.Error()
 		return c, r
 	}
 	r.Status = "pass"

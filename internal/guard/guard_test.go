@@ -68,7 +68,7 @@ func TestCandidateGitManifestAndImmutableApproval(t *testing.T) {
 	targetBytes, _ := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
 	target := string(bytes.TrimSpace(targetBytes))
 	candidate := filepath.Join(d, "candidate.json")
-	candidateJSON := fmt.Sprintf(`{"spec":"lifecycle-spec/release-candidate/v1","requirement":{"id":"req-1","title":"Ship"},"sources":[{"taskId":"task-1","repositoryPath":%q,"branch":"main","headCommit":%q,"clean":true}],"readiness":{"criteriaTotal":1,"criteriaSatisfied":1,"criteriaWithEvidence":1,"tasksTotal":1,"tasksDone":1,"sourcesTotal":1,"sourcesClean":1,"ready":true}}`, repo, target)
+	candidateJSON := validCandidateJSON(repo, target)
 	if err := os.WriteFile(candidate, []byte(candidateJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +84,15 @@ func TestCandidateGitManifestAndImmutableApproval(t *testing.T) {
 		omitRepo bool
 	}{
 		{name: "candidate without Git provenance", omitRepo: true},
+		{name: "positive summary cannot replace evidence details", rewrite: func(s string) string {
+			var document map[string]any
+			_ = json.Unmarshal([]byte(s), &document)
+			delete(document, "acceptanceCriteria")
+			delete(document, "tasks")
+			delete(document, "evidence")
+			data, _ := json.Marshal(document)
+			return string(data)
+		}},
 		{name: "negative acceptance counts", rewrite: func(s string) string {
 			s = strings.ReplaceAll(s, `"criteriaTotal":1`, `"criteriaTotal":-1`)
 			s = strings.ReplaceAll(s, `"criteriaSatisfied":1`, `"criteriaSatisfied":-1`)
