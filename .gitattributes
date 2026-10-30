@@ -1,3 +1,7 @@
 *.sh text eol=lf
 *.service text eol=lf
 *.ps1 text eol=crlf
+
+LICENSES/** -text
+LICENSE text eol=lf
+internal/team/AGPL-3.0-only.txt text eol=lf

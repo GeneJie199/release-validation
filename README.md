@@ -1,9 +1,18 @@
 # ReleaseGuard
 
+
+## v2 development and licensing
+
+Stable: v1.x (historical Apache-2.0 releases). Under development: v2 AI Engineering Team; not GA.
+
+Community Edition: **AGPL-3.0-only** for this development source. Historical release rights remain valid.
+Commercial / OEM licensing available for closed-source redistribution, white-labeling, embedding and other use cases incompatible with AGPL. See [license policy](LICENSE_POLICY.md), [history](LICENSING_HISTORY.md) and [commercial policy](COMMERCIAL_LICENSE.md).
+
+
 AI DevOps Open Suite 的发布验证与证据模块。它把一份可评审 JSON 计划执行成确定性门禁、不可变报告、回滚步骤和独立人工批准记录。
 
 [![CI](https://github.com/GeneJie199/release-validation/actions/workflows/ci.yml/badge.svg)](https://github.com/GeneJie199/release-validation/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 ## Screenshot
 
@@ -261,4 +270,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Action Install -
 - `playwright` 类型复用本机已安装的命令，不内置浏览器运行时。
 - 文件/命令/HTTP 证据证明计划检查结果，不证明计划之外的业务正确性。
 
-Apache-2.0。贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)。
+AGPL-3.0-only。贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)。

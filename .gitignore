@@ -6,3 +6,8 @@
 *.db
 *.db-shm
 *.db-wal
+
+/.qa/
+/*-tests.log
+/baseline-suite.log
+/AI-DEV-V2-C0-DELIVERY.zip*
