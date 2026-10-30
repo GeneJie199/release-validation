@@ -130,6 +130,58 @@ func TestCandidateGitManifestAndImmutableApproval(t *testing.T) {
 			}
 		})
 	}
+	t.Run("source change invalidates proof and fresh revalidation recovers", func(t *testing.T) {
+		var document candidateDocument
+		if err := json.Unmarshal([]byte(candidateJSON), &document); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("new release source"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		run("add", "README.md")
+		run("commit", "-m", "source changed after machine verification")
+		newHead, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		document.Sources[0].HeadCommit = strings.TrimSpace(string(newHead))
+		document.GeneratedAt = time.Now().UTC()
+		check := func(want string) {
+			t.Helper()
+			raw, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(candidate, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			planBytes, _ := json.Marshal(p)
+			report := Run(context.Background(), p, planBytes)
+			if report.Decision != want {
+				t.Fatalf("got %s, want %s: %+v", report.Decision, want, report.Results)
+			}
+		}
+		check("NO-GO")
+		old := document.Evidence[0]
+		old.CreatedAt = time.Now().Add(-25 * time.Hour)
+		fresh := old
+		fresh.ID = "fresh-proof"
+		fresh.CreatedAt = time.Now().UTC()
+		fresh.Metadata = map[string]string{}
+		for key, value := range old.Metadata {
+			fresh.Metadata[key] = value
+		}
+		fresh.Metadata["sourceCommit"] = document.Sources[0].HeadCommit
+		fresh.Metadata["sourceCommitAfter"] = document.Sources[0].HeadCommit
+		fresh.Metadata["verificationRunId"] = "fresh-run"
+		document.Evidence = []candidateEvidence{old, fresh}
+		check("GO")
+		document.Evidence[1].Status = "failed"
+		check("NO-GO")
+		document.Evidence = []candidateEvidence{fresh}
+		document.Evidence[0].CreatedAt = time.Now().Add(-25 * time.Hour)
+		check("NO-GO")
+	})
 	out := filepath.Join(d, "report.json")
 	if err := WriteReport(out, r); err != nil {
 		t.Fatal(err)

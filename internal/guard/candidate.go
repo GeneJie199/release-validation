@@ -53,8 +53,10 @@ type candidateDocument struct {
 		HeadCommit     string `json:"headCommit"`
 		Clean          bool   `json:"clean"`
 	} `json:"sources"`
-	EvidenceComplete json.RawMessage `json:"evidenceComplete,omitempty"`
-	TeamRuntime      json.RawMessage `json:"teamRuntime,omitempty"`
+	EvidenceComplete        json.RawMessage `json:"evidenceComplete,omitempty"`
+	TeamRuntime             json.RawMessage `json:"teamRuntime,omitempty"`
+	MachineEvidenceRequired bool            `json:"machineEvidenceRequired,omitempty"`
+	MachineEvidenceCurrent  *bool           `json:"machineEvidenceCurrent,omitempty"`
 }
 
 type candidateEvidence struct {
@@ -77,6 +79,47 @@ func candidateSamePath(left, right string) bool {
 	return left == right || runtime.GOOS == "windows" && strings.EqualFold(left, right)
 }
 
+func candidateMachineKey(e candidateEvidence) string {
+	directory := e.Metadata["workingDir"]
+	if directory != "" {
+		directory = filepath.Clean(filepath.FromSlash(strings.ReplaceAll(directory, "\\", "/")))
+		if runtime.GOOS == "windows" {
+			directory = strings.ToLower(directory)
+		}
+	}
+	return e.Metadata["command"] + "\x00" + directory + "\x00" + e.TaskID
+}
+
+func latestCandidateMachineChecks(evidence []candidateEvidence) map[string]candidateEvidence {
+	latest := map[string]candidateEvidence{}
+	for _, e := range evidence {
+		if (e.Kind != "test" && e.Kind != "command") || strings.TrimSpace(e.Metadata["command"]) == "" {
+			continue
+		}
+		key := candidateMachineKey(e)
+		previous, exists := latest[key]
+		if !exists || e.CreatedAt.After(previous.CreatedAt) || e.CreatedAt.Equal(previous.CreatedAt) && e.Status != "passed" {
+			latest[key] = e
+		}
+	}
+	return latest
+}
+
+func candidateMachineSourceMatches(e candidateEvidence, c candidateDocument) bool {
+	m := e.Metadata
+	if m["sourceVerified"] != "true" || m["sourceClean"] != "true" || m["sourceCleanAfter"] != "true" || strings.TrimSpace(m["verificationRunId"]) == "" ||
+		!strings.EqualFold(m["sourceCommit"], m["sourceCommitAfter"]) || !candidateSamePath(m["sourceRepository"], m["sourceRepositoryAfter"]) || !candidateSamePath(m["sourceWorktree"], m["sourceWorktreeAfter"]) {
+		return false
+	}
+	for _, source := range c.Sources {
+		linked := e.TaskID == source.TaskID || e.TaskID == "" && (candidateSamePath(m["workingDir"], source.WorktreePath) || candidateSamePath(m["workingDir"], source.RepositoryPath))
+		if source.Clean && linked && strings.EqualFold(m["sourceCommit"], source.HeadCommit) && candidateSamePath(m["sourceRepository"], source.RepositoryPath) && candidateSamePath(m["sourceWorktree"], source.WorktreePath) {
+			return true
+		}
+	}
+	return false
+}
+
 // This checks local evidence consistency, not authenticity against a remote signer.
 func validateCandidateDetails(c candidateDocument, now time.Time) error {
 	if c.Kind != "release-candidate" || c.GeneratedAt.IsZero() || now.Sub(c.GeneratedAt) > candidateMaxAge || c.GeneratedAt.Sub(now) > candidateClockSkew {
@@ -92,6 +135,9 @@ func validateCandidateDetails(c candidateDocument, now time.Time) error {
 		if json.Unmarshal(c.TeamRuntime, &signal) != nil || !bytes.Equal(bytes.TrimSpace(signal.EvidenceComplete), []byte("true")) {
 			return fmt.Errorf("candidate runtime evidence is incomplete")
 		}
+	}
+	if c.MachineEvidenceCurrent != nil && !*c.MachineEvidenceCurrent || c.MachineEvidenceRequired && c.MachineEvidenceCurrent == nil {
+		return fmt.Errorf("candidate machine evidence is not current")
 	}
 	if len(c.AcceptanceCriteria) != c.Readiness.CriteriaTotal || len(c.Tasks) != c.Readiness.TasksTotal {
 		return fmt.Errorf("candidate detail lengths disagree with readiness counts")
@@ -138,8 +184,8 @@ func validateCandidateDetails(c candidateDocument, now time.Time) error {
 			return fmt.Errorf("candidate evidence identity or linkage is invalid")
 		}
 		seen[evidence.ID] = true
-		if evidence.CreatedAt.IsZero() || now.Sub(evidence.CreatedAt) > candidateMaxAge || evidence.CreatedAt.Sub(c.GeneratedAt) > candidateClockSkew || evidence.CreatedAt.Sub(now) > candidateClockSkew {
-			return fmt.Errorf("candidate evidence is stale, missing a timestamp or dated after candidate generation")
+		if evidence.CreatedAt.IsZero() {
+			return fmt.Errorf("candidate evidence is missing a timestamp")
 		}
 		if evidence.Status != "passed" && evidence.Status != "failed" && evidence.Status != "informational" {
 			return fmt.Errorf("candidate evidence status is invalid")
@@ -151,20 +197,8 @@ func validateCandidateDetails(c candidateDocument, now time.Time) error {
 			}
 		}
 		if (evidence.Kind == "test" || evidence.Kind == "command") && strings.TrimSpace(evidence.Metadata["command"]) != "" {
-			if code, exists := evidence.Metadata["exitCode"]; exists && evidence.Status == "passed" && code != "0" {
-				return fmt.Errorf("candidate passed machine-check evidence has a nonzero exit code")
-			}
-			if status, exists := evidence.Metadata["runStatus"]; exists && evidence.Status == "passed" && status != "passed" {
-				return fmt.Errorf("candidate passed machine-check evidence has an unsuccessful run status")
-			}
-			linked := sourcedTasks[evidence.TaskID]
-			for _, source := range c.Sources {
-				linked = linked || candidateSamePath(evidence.Metadata["workingDir"], source.WorktreePath) || candidateSamePath(evidence.Metadata["workingDir"], source.RepositoryPath)
-			}
-			if !linked {
-				return fmt.Errorf("candidate machine check is not linked to a source task or directory")
-			}
-			key := evidence.Metadata["command"] + "\x00" + evidence.Metadata["workingDir"] + "\x00" + evidence.TaskID
+
+			key := candidateMachineKey(evidence)
 			previous, exists := machine[key]
 			if !exists || evidence.CreatedAt.After(previous.CreatedAt) || evidence.CreatedAt.Equal(previous.CreatedAt) && evidence.Status != "passed" {
 				machine[key] = evidence
@@ -172,6 +206,9 @@ func validateCandidateDetails(c candidateDocument, now time.Time) error {
 		}
 	}
 	for id := range criteria {
+		if !candidateEvidenceFresh(latest[id], c.GeneratedAt, now) {
+			return fmt.Errorf("candidate latest criterion evidence is stale or future-dated")
+		}
 		if latest[id].Status != "passed" {
 			return fmt.Errorf("candidate criterion lacks current passed evidence")
 		}
@@ -180,9 +217,25 @@ func validateCandidateDetails(c candidateDocument, now time.Time) error {
 		return fmt.Errorf("candidate lacks passed machine-check evidence with an executed command")
 	}
 	for _, check := range machine {
+		if !candidateEvidenceFresh(check, c.GeneratedAt, now) {
+			return fmt.Errorf("candidate latest machine-check evidence is stale or future-dated")
+		}
+		if code, exists := check.Metadata["exitCode"]; exists && check.Status == "passed" && code != "0" {
+			return fmt.Errorf("candidate passed machine-check evidence has a nonzero exit code")
+		}
+		if status, exists := check.Metadata["runStatus"]; exists && check.Status == "passed" && status != "passed" {
+			return fmt.Errorf("candidate passed machine-check evidence has an unsuccessful run status")
+		}
 		if check.Status != "passed" {
 			return fmt.Errorf("candidate latest machine-check evidence is not passed")
 		}
+		if !candidateMachineSourceMatches(check, c) {
+			return fmt.Errorf("candidate machine-check proof is not bound to unchanged clean source at the exported commit")
+		}
 	}
 	return nil
+}
+
+func candidateEvidenceFresh(e candidateEvidence, generated, now time.Time) bool {
+	return !e.CreatedAt.IsZero() && now.Sub(e.CreatedAt) <= candidateMaxAge && e.CreatedAt.Sub(generated) <= candidateClockSkew && e.CreatedAt.Sub(now) <= candidateClockSkew
 }

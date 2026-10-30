@@ -75,6 +75,9 @@ func loadCandidate(path string) (*CandidateSummary, Result) {
 		r.Summary = err.Error()
 		return c, r
 	}
+	for _, proof := range latestCandidateMachineChecks(raw.Evidence) {
+		c.MachineChecks = append(c.MachineChecks, CandidateMachineCheck{EvidenceID: proof.ID, RunID: proof.Metadata["verificationRunId"], RepositoryPath: proof.Metadata["sourceRepository"], WorktreePath: proof.Metadata["sourceWorktree"], HeadCommit: proof.Metadata["sourceCommit"]})
+	}
 	r.Status = "pass"
 	r.Summary = "release candidate is ready"
 	return c, r
@@ -95,13 +98,18 @@ func checkCandidateGit(candidate *CandidateSummary, manifest *GitManifest) Resul
 	for _, source := range candidate.Sources {
 		sourceRepository, statErr := os.Stat(source.RepositoryPath)
 		if source.Clean && strings.EqualFold(source.HeadCommit, manifest.TargetCommit) && statErr == nil && sourceRepository.IsDir() && os.SameFile(repository, sourceRepository) {
-			result.Status = "pass"
-			result.Summary = "ReleaseGuard target commit matches a clean DevCycle source"
-			result.Evidence["source"] = source
-			return result
+			for _, proof := range candidate.MachineChecks {
+				if strings.EqualFold(proof.HeadCommit, manifest.TargetCommit) && candidateSamePath(proof.RepositoryPath, source.RepositoryPath) {
+					result.Status = "pass"
+					result.Summary = "ReleaseGuard target commit matches a machine-verified clean DevCycle source"
+					result.Evidence["source"] = source
+					result.Evidence["machine_check"] = proof
+					return result
+				}
+			}
 		}
 	}
-	result.Summary = "ReleaseGuard target repository and commit are not pinned by a clean DevCycle source"
+	result.Summary = "ReleaseGuard target repository and commit lack a matching machine-verified clean DevCycle source"
 	result.Evidence["candidate_sources"] = candidate.Sources
 	return result
 }

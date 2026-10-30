@@ -12,7 +12,15 @@ import (
 
 func validCandidateJSON(repo, target string) string {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	return fmt.Sprintf(`{"spec":"lifecycle-spec/release-candidate/v1","kind":"release-candidate","generatedAt":%q,"requirement":{"id":"req-1","title":"Ship"},"acceptanceCriteria":[{"id":"criterion-1","requirementId":"req-1","satisfied":true}],"tasks":[{"id":"task-1","requirementId":"req-1","status":"done","branch":"main","worktreePath":%q}],"evidence":[{"id":"proof-1","requirementId":"req-1","criterionId":"criterion-1","taskId":"task-1","kind":"test","status":"passed","createdAt":%q,"metadata":{"command":"go test ./..."}}],"sources":[{"taskId":"task-1","repositoryPath":%q,"worktreePath":%q,"branch":"main","headCommit":%q,"clean":true}],"readiness":{"criteriaTotal":1,"criteriaSatisfied":1,"criteriaWithEvidence":1,"tasksTotal":1,"tasksDone":1,"sourcesTotal":1,"sourcesClean":1,"ready":true}}`, now, repo, now, repo, repo, target)
+	document := fmt.Sprintf(`{"spec":"lifecycle-spec/release-candidate/v1","kind":"release-candidate","generatedAt":%q,"requirement":{"id":"req-1","title":"Ship"},"acceptanceCriteria":[{"id":"criterion-1","requirementId":"req-1","satisfied":true}],"tasks":[{"id":"task-1","requirementId":"req-1","status":"done","branch":"main","worktreePath":%q}],"evidence":[{"id":"proof-1","requirementId":"req-1","criterionId":"criterion-1","taskId":"task-1","kind":"test","status":"passed","createdAt":%q,"metadata":{"command":"go test ./..."}}],"sources":[{"taskId":"task-1","repositoryPath":%q,"worktreePath":%q,"branch":"main","headCommit":%q,"clean":true}],"readiness":{"criteriaTotal":1,"criteriaSatisfied":1,"criteriaWithEvidence":1,"tasksTotal":1,"tasksDone":1,"sourcesTotal":1,"sourcesClean":1,"ready":true}}`, now, repo, now, repo, repo, target)
+	var raw map[string]any
+	_ = json.Unmarshal([]byte(document), &raw)
+	metadata := raw["evidence"].([]any)[0].(map[string]any)["metadata"].(map[string]any)
+	for key, value := range map[string]string{"verificationRunId": "run-1", "sourceRepository": repo, "sourceWorktree": repo, "sourceCommit": target, "sourceRepositoryAfter": repo, "sourceWorktreeAfter": repo, "sourceCommitAfter": target, "sourceClean": "true", "sourceCleanAfter": "true", "sourceVerified": "true"} {
+		metadata[key] = value
+	}
+	data, _ := json.Marshal(raw)
+	return string(data)
 }
 
 func TestCandidateDetailsRejectForgedReadiness(t *testing.T) {
@@ -25,6 +33,16 @@ func TestCandidateDetailsRejectForgedReadiness(t *testing.T) {
 	}{
 		{"positive summary with missing details", func(c map[string]any) { delete(c, "acceptanceCriteria"); delete(c, "tasks"); delete(c, "evidence") }},
 		{"missing evidence", func(c map[string]any) { delete(c, "evidence") }},
+		{"machine proof missing source binding", func(c map[string]any) { delete(item(c, "evidence")["metadata"].(map[string]any), "sourceVerified") }},
+		{"machine proof missing run identity", func(c map[string]any) { delete(item(c, "evidence")["metadata"].(map[string]any), "verificationRunId") }},
+		{"machine proof source was dirty", func(c map[string]any) { item(c, "evidence")["metadata"].(map[string]any)["sourceClean"] = "false" }},
+		{"machine proof source became dirty", func(c map[string]any) { item(c, "evidence")["metadata"].(map[string]any)["sourceCleanAfter"] = "false" }},
+		{"machine proof source changed during execution", func(c map[string]any) {
+			item(c, "evidence")["metadata"].(map[string]any)["sourceCommitAfter"] = strings.Repeat("b", 40)
+		}},
+		{"source committed after machine proof", func(c map[string]any) { item(c, "sources")["headCommit"] = strings.Repeat("b", 40) }},
+		{"machine evidence current false", func(c map[string]any) { c["machineEvidenceCurrent"] = false }},
+		{"machine evidence required without current signal", func(c map[string]any) { c["machineEvidenceRequired"] = true }},
 		{"duplicate evidence identity", func(c map[string]any) { c["evidence"] = append(c["evidence"].([]any), item(c, "evidence")) }},
 		{"criterion count mismatch", func(c map[string]any) { c["acceptanceCriteria"] = []any{} }},
 		{"unsatisfied criterion", func(c map[string]any) { item(c, "acceptanceCriteria")["satisfied"] = false }},
@@ -122,5 +140,19 @@ func TestCandidateNormalizedSourcePathsAndMachineWorkingDirectory(t *testing.T) 
 	}
 	if _, result := loadCandidate(path); result.Status != "pass" {
 		t.Fatalf("equivalent source paths rejected: %+v", result)
+	}
+}
+
+func TestCandidateTargetMustHaveMatchingMachineCommit(t *testing.T) {
+	repo := t.TempDir()
+	target := strings.Repeat("b", 40)
+	candidate := &CandidateSummary{Sources: []CandidateSourceSummary{{TaskID: "new-lead", RepositoryPath: repo, HeadCommit: target, Clean: true}}, MachineChecks: []CandidateMachineCheck{{EvidenceID: "old-qa", RepositoryPath: repo, HeadCommit: strings.Repeat("a", 40)}}}
+	manifest := &GitManifest{Repository: repo, TargetCommit: target}
+	if result := checkCandidateGit(candidate, manifest); result.Status != "fail" {
+		t.Fatal("old QA snapshot authorized a different release target")
+	}
+	candidate.MachineChecks[0].HeadCommit = target
+	if result := checkCandidateGit(candidate, manifest); result.Status != "pass" {
+		t.Fatalf("current machine proof rejected: %+v", result)
 	}
 }
