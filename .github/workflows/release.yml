@@ -44,6 +44,12 @@ jobs:
       - name: Release plan fuzz smoke
         if: matrix.os == 'ubuntu-latest'
         run: go test -parallel=2 -run='^$' -fuzz='^FuzzLoadPlan$' -fuzztime=5s ./internal/guard
+      - name: Validate release license and version metadata
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          python3 scripts/license-guard.py
+          python3 -c 'import json,os; assert "v"+json.load(open("LICENSE_METADATA.json"))["sourceVersion"] == os.environ["GITHUB_REF_NAME"], "tag and license metadata version differ"'
       - name: Verify tag is documented
         if: matrix.os == 'ubuntu-latest'
         shell: bash
@@ -133,9 +139,13 @@ jobs:
         with:
           subject-path: |
             dist/*
-      - uses: softprops/action-gh-release@v3
-        with:
-          files: dist/*
-          body_path: RELEASE_NOTES.md
-          generate_release_notes: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          options=(--verify-tag --notes-file RELEASE_NOTES.md --title "release-validation ${tag}")
+          [[ "$tag" == *-* ]] && options+=(--prerelease)
+          # Create fails for an existing release; never update or clobber assets.
+          gh release create "$tag" dist/* "${options[@]}"
