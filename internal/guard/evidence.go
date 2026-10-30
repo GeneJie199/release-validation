@@ -65,7 +65,7 @@ func loadCandidate(path string) (*CandidateSummary, Result) {
 		r.Summary = "release candidate is not ready"
 		return c, r
 	}
-	if c.RequirementID == "" || c.RequirementTitle == "" || c.CriteriaTotal == 0 || c.TasksTotal == 0 || c.SourcesTotal == 0 || c.CriteriaSatisfied != c.CriteriaTotal || c.CriteriaWithEvidence != c.CriteriaTotal || c.TasksDone != c.TasksTotal || c.SourcesClean != c.SourcesTotal {
+	if strings.TrimSpace(c.RequirementID) == "" || strings.TrimSpace(c.RequirementTitle) == "" || c.CriteriaTotal <= 0 || c.TasksTotal <= 0 || c.SourcesTotal <= 0 || c.CriteriaSatisfied != c.CriteriaTotal || c.CriteriaWithEvidence != c.CriteriaTotal || c.TasksDone != c.TasksTotal || c.SourcesClean != c.SourcesTotal {
 		r.Summary = "release candidate readiness counts are inconsistent"
 		return c, r
 	}
@@ -96,20 +96,27 @@ func loadCandidate(path string) (*CandidateSummary, Result) {
 }
 
 func checkCandidateGit(candidate *CandidateSummary, manifest *GitManifest) Result {
-	result := Result{Name: "DevCycle source provenance", Type: "candidate-git", Status: "fail", Required: true, Evidence: map[string]any{"target_commit": manifest.TargetCommit}}
+	result := Result{Name: "DevCycle source provenance", Type: "candidate-git", Status: "fail", Required: true, Evidence: map[string]any{}}
 	if candidate == nil || manifest == nil {
 		result.Summary = "candidate and Git manifest are both required"
 		return result
 	}
+	result.Evidence["target_commit"] = manifest.TargetCommit
+	repository, err := os.Stat(manifest.Repository)
+	if err != nil || !repository.IsDir() {
+		result.Summary = "ReleaseGuard repository is unavailable"
+		return result
+	}
 	for _, source := range candidate.Sources {
-		if source.Clean && strings.EqualFold(source.HeadCommit, manifest.TargetCommit) {
+		sourceRepository, statErr := os.Stat(source.RepositoryPath)
+		if source.Clean && strings.EqualFold(source.HeadCommit, manifest.TargetCommit) && statErr == nil && sourceRepository.IsDir() && os.SameFile(repository, sourceRepository) {
 			result.Status = "pass"
 			result.Summary = "ReleaseGuard target commit matches a clean DevCycle source"
 			result.Evidence["source"] = source
 			return result
 		}
 	}
-	result.Summary = "ReleaseGuard target commit is not pinned by a clean DevCycle source"
+	result.Summary = "ReleaseGuard target repository and commit are not pinned by a clean DevCycle source"
 	result.Evidence["candidate_sources"] = candidate.Sources
 	return result
 }

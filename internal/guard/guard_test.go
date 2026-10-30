@@ -78,6 +78,49 @@ func TestCandidateGitManifestAndImmutableApproval(t *testing.T) {
 	if r.Decision != "GO" || r.Manifest.Git == nil || len(r.Manifest.Git.MigrationFiles) != 1 {
 		t.Fatalf("report=%+v", r)
 	}
+	for _, test := range []struct {
+		name     string
+		rewrite  func(string) string
+		omitRepo bool
+	}{
+		{name: "candidate without Git provenance", omitRepo: true},
+		{name: "negative acceptance counts", rewrite: func(s string) string {
+			s = strings.ReplaceAll(s, `"criteriaTotal":1`, `"criteriaTotal":-1`)
+			s = strings.ReplaceAll(s, `"criteriaSatisfied":1`, `"criteriaSatisfied":-1`)
+			return strings.ReplaceAll(s, `"criteriaWithEvidence":1`, `"criteriaWithEvidence":-1`)
+		}},
+		{name: "negative task counts", rewrite: func(s string) string {
+			s = strings.ReplaceAll(s, `"tasksTotal":1`, `"tasksTotal":-1`)
+			return strings.ReplaceAll(s, `"tasksDone":1`, `"tasksDone":-1`)
+		}},
+		{name: "nonexistent source with real target hash", rewrite: func(s string) string {
+			return strings.Replace(s, fmt.Sprintf(`"repositoryPath":%q`, repo), fmt.Sprintf(`"repositoryPath":%q`, filepath.Join(d, "missing")), 1)
+		}},
+		{name: "unrelated directory with real target hash", rewrite: func(s string) string {
+			return strings.Replace(s, fmt.Sprintf(`"repositoryPath":%q`, repo), fmt.Sprintf(`"repositoryPath":%q`, d), 1)
+		}},
+		{name: "source target hash mismatch", rewrite: func(s string) string {
+			return strings.Replace(s, target, strings.Repeat("a", 40), 1)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			modified := candidateJSON
+			if test.rewrite != nil {
+				modified = test.rewrite(modified)
+			}
+			if err := os.WriteFile(candidate, []byte(modified), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			plan := p
+			if test.omitRepo {
+				plan.Repository, plan.BaseRef, plan.TargetRef = "", "", ""
+			}
+			planBytes, _ := json.Marshal(plan)
+			if report := Run(context.Background(), plan, planBytes); report.Decision != "NO-GO" {
+				t.Fatalf("unverified candidate returned %s: %+v", report.Decision, report.Results)
+			}
+		})
+	}
 	out := filepath.Join(d, "report.json")
 	if err := WriteReport(out, r); err != nil {
 		t.Fatal(err)
