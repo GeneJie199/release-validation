@@ -151,6 +151,12 @@ func validateCandidateDetails(c candidateDocument, now time.Time) error {
 			}
 		}
 		if (evidence.Kind == "test" || evidence.Kind == "command") && strings.TrimSpace(evidence.Metadata["command"]) != "" {
+			if code, exists := evidence.Metadata["exitCode"]; exists && evidence.Status == "passed" && code != "0" {
+				return fmt.Errorf("candidate passed machine-check evidence has a nonzero exit code")
+			}
+			if status, exists := evidence.Metadata["runStatus"]; exists && evidence.Status == "passed" && status != "passed" {
+				return fmt.Errorf("candidate passed machine-check evidence has an unsuccessful run status")
+			}
 			linked := sourcedTasks[evidence.TaskID]
 			for _, source := range c.Sources {
 				linked = linked || candidateSamePath(evidence.Metadata["workingDir"], source.WorktreePath) || candidateSamePath(evidence.Metadata["workingDir"], source.RepositoryPath)

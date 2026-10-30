@@ -38,6 +38,8 @@ func TestCandidateDetailsRejectForgedReadiness(t *testing.T) {
 		{"evidence wrong criterion", func(c map[string]any) { item(c, "evidence")["criterionId"] = "other" }},
 		{"evidence wrong task", func(c map[string]any) { item(c, "evidence")["taskId"] = "other" }},
 		{"failed evidence", func(c map[string]any) { item(c, "evidence")["status"] = "failed" }},
+		{"passed machine with nonzero exit", func(c map[string]any) { item(c, "evidence")["metadata"].(map[string]any)["exitCode"] = "1" }},
+		{"passed machine with failed run", func(c map[string]any) { item(c, "evidence")["metadata"].(map[string]any)["runStatus"] = "failed" }},
 		{"natural language assertion without command", func(c map[string]any) {
 			item(c, "evidence")["metadata"] = map[string]any{"missionId": "mission", "spec": "devcycle.ai-team/v2alpha1"}
 		}},
