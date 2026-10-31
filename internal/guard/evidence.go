@@ -100,6 +100,10 @@ func checkCandidateGit(candidate *CandidateSummary, manifest *GitManifest) Resul
 		if source.Clean && strings.EqualFold(source.HeadCommit, manifest.TargetCommit) && statErr == nil && sourceRepository.IsDir() && os.SameFile(repository, sourceRepository) {
 			for _, proof := range candidate.MachineChecks {
 				if strings.EqualFold(proof.HeadCommit, manifest.TargetCommit) && candidateSamePath(proof.RepositoryPath, source.RepositoryPath) {
+					if !candidateSourcesMachineCovered(candidate) {
+						result.Summary = "candidate sources are not covered by current machine-verified commits"
+						return result
+					}
 					result.Status = "pass"
 					result.Summary = "ReleaseGuard target commit matches a machine-verified clean DevCycle source"
 					result.Evidence["source"] = source
@@ -112,6 +116,34 @@ func checkCandidateGit(candidate *CandidateSummary, manifest *GitManifest) Resul
 	result.Summary = "ReleaseGuard target repository and commit lack a matching machine-verified clean DevCycle source"
 	result.Evidence["candidate_sources"] = candidate.Sources
 	return result
+}
+
+func candidateSourcesMachineCovered(candidate *CandidateSummary) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, source := range candidate.Sources {
+		covered := false
+		repository, err := os.Stat(source.RepositoryPath)
+		if err != nil || !repository.IsDir() {
+			return false
+		}
+		for _, proof := range candidate.MachineChecks {
+			proofRepository, err := os.Stat(proof.RepositoryPath)
+			if err != nil || !os.SameFile(repository, proofRepository) {
+				continue
+			}
+			cmd := exec.CommandContext(ctx, "git", "-C", proof.RepositoryPath, "merge-base", "--is-ancestor", source.HeadCommit, proof.HeadCommit)
+			prepareManagedCommand(cmd)
+			if cmd.Run() == nil {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
 }
 
 func buildGitManifest(ctx context.Context, p Plan) (*GitManifest, Result) {

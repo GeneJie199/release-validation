@@ -2,10 +2,12 @@ package guard
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -80,6 +82,9 @@ func candidateSamePath(left, right string) bool {
 }
 
 func candidateMachineKey(e candidateEvidence) string {
+	if key, _, err := candidateControllerCheck(e); err == nil && key != "" {
+		return key
+	}
 	directory := e.Metadata["workingDir"]
 	if directory != "" {
 		directory = filepath.Clean(filepath.FromSlash(strings.ReplaceAll(directory, "\\", "/")))
@@ -90,6 +95,37 @@ func candidateMachineKey(e candidateEvidence) string {
 	return e.Metadata["command"] + "\x00" + directory + "\x00" + e.TaskID
 }
 
+// Only the runtime-owned complete Team scope can supersede an earlier worktree.
+// Ordinary v1 machine evidence keeps its independent command/directory/task key.
+func candidateControllerCheck(e candidateEvidence) (string, int, error) {
+	m := e.Metadata
+	if m["logicalCheckId"] == "" && m["planTaskId"] == "" && m["verificationAttempt"] == "" {
+		return "", 0, nil
+	}
+	logical, err := hex.DecodeString(m["logicalCheckId"])
+	attempt, parseErr := strconv.Atoi(m["verificationAttempt"])
+	index, indexErr := strconv.Atoi(m["verificationCheckIndex"])
+	parts := []string{m["missionId"], m["planTaskId"], e.TaskID, m["logicalCheckId"], m["command"]}
+	if err != nil || len(logical) != 32 || parseErr != nil || attempt <= 0 || indexErr != nil || index < 0 || strings.TrimSpace(m["executionId"]) == "" || strings.TrimSpace(m["verificationRunId"]) == "" {
+		return "", 0, fmt.Errorf("candidate controller check scope or attempt is invalid")
+	}
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" || strings.ContainsRune(part, '\x00') {
+			return "", 0, fmt.Errorf("candidate controller check scope is incomplete")
+		}
+	}
+	return "team\x00" + strings.Join(parts, "\x00"), attempt, nil
+}
+
+func candidateMachineNewer(current, previous candidateEvidence) bool {
+	_, currentAttempt, _ := candidateControllerCheck(current)
+	_, previousAttempt, _ := candidateControllerCheck(previous)
+	if currentAttempt != previousAttempt {
+		return currentAttempt > previousAttempt
+	}
+	return current.CreatedAt.After(previous.CreatedAt) || current.CreatedAt.Equal(previous.CreatedAt) && current.Status != "passed"
+}
+
 func latestCandidateMachineChecks(evidence []candidateEvidence) map[string]candidateEvidence {
 	latest := map[string]candidateEvidence{}
 	for _, e := range evidence {
@@ -98,7 +134,7 @@ func latestCandidateMachineChecks(evidence []candidateEvidence) map[string]candi
 		}
 		key := candidateMachineKey(e)
 		previous, exists := latest[key]
-		if !exists || e.CreatedAt.After(previous.CreatedAt) || e.CreatedAt.Equal(previous.CreatedAt) && e.Status != "passed" {
+		if !exists || candidateMachineNewer(e, previous) {
 			latest[key] = e
 		}
 	}
@@ -197,10 +233,13 @@ func validateCandidateDetails(c candidateDocument, now time.Time) error {
 			}
 		}
 		if (evidence.Kind == "test" || evidence.Kind == "command") && strings.TrimSpace(evidence.Metadata["command"]) != "" {
+			if _, _, err := candidateControllerCheck(evidence); err != nil {
+				return err
+			}
 
 			key := candidateMachineKey(evidence)
 			previous, exists := machine[key]
-			if !exists || evidence.CreatedAt.After(previous.CreatedAt) || evidence.CreatedAt.Equal(previous.CreatedAt) && evidence.Status != "passed" {
+			if !exists || candidateMachineNewer(evidence, previous) {
 				machine[key] = evidence
 			}
 		}

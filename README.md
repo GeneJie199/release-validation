@@ -226,6 +226,8 @@ ReleaseGuard 计划引用 `candidate_file`、`drift_file` 和 `fleet` 后，会�
 
 机器检查还必须包含 `verificationRunId`，以及控制器在执行前后采集的 `sourceRepository`、`sourceWorktree`、`sourceCommit`、`sourceClean` 和对应 `After` 字段；只有实际 Git 来源在检查前后保持同一干净提交，`sourceVerified` 才能为 true。最新机器证据的提交必须匹配当前候选来源，且拟发布的目标提交必须有同仓库、同提交的机器证明。检查后修改或提交源码会使旧证明失效，需重新运行检查。未绑定 Git 的检查仍可用于普通无 `candidate_file` 计划，不能用来证明候选源码已验证。
 
+AI Team 修复重试使用控制器专属的 `missionId`、`planTaskId`、稳定真实 Task ID、`logicalCheckId`、`verificationCheckIndex`、`verificationAttempt`、`executionId` 和 run ID 关联同一逻辑检查；只有完整关联存在时，较高 attempt 的证明才能跨新 worktree 覆盖旧失败。不同逻辑检查/命令保持独立，最新失败仍会阻断；普通 v1 检查继续按命令、目录、任务区分，不能用另一目录的成功隐藏失败。所有候选来源还必须是同仓库机器验证提交本身或其祖先，发布目标仍须精确匹配已验证提交。公共 AddEvidence 不能写入这些控制器保留字段；本地 JSON 的真实性仍依赖下述信任边界。
+
 该门禁验证本地导出文件的内部一致性与 Git 来源绑定，不是签名的远程证明。能篡改本机候选、证据和源仓库的人仍处于信任边界内；跨信任边界使用时，应由可信 CI 重新运行检查，并独立核验制品与来源证明。
 
 观察期间每个样本都会写入 SQLite。活动 run 使用短期租约保证同一时刻只有一个进程执行门禁；正常中断立即释放，崩溃后的租约会自动过期。以相同计划和 `--state` 再次运行 `check` 会恢复同一个 run，只执行剩余观察窗口，不重复命令门禁或基线采集。`releaseguard runs` 可查看 run ID、阶段、样本数和最终决策。

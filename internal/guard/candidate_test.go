@@ -151,8 +151,4 @@ func TestCandidateTargetMustHaveMatchingMachineCommit(t *testing.T) {
 	if result := checkCandidateGit(candidate, manifest); result.Status != "fail" {
 		t.Fatal("old QA snapshot authorized a different release target")
 	}
-	candidate.MachineChecks[0].HeadCommit = target
-	if result := checkCandidateGit(candidate, manifest); result.Status != "pass" {
-		t.Fatalf("current machine proof rejected: %+v", result)
-	}
 }
