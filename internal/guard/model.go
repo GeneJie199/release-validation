@@ -119,6 +119,15 @@ type CandidateSummary struct {
 	SourcesClean         int                      `json:"sources_clean"`
 	Sources              []CandidateSourceSummary `json:"sources,omitempty"`
 	Ready                bool                     `json:"ready"`
+	MachineChecks        []CandidateMachineCheck  `json:"machine_checks,omitempty"`
+}
+
+type CandidateMachineCheck struct {
+	EvidenceID     string `json:"evidence_id"`
+	RunID          string `json:"verification_run_id"`
+	RepositoryPath string `json:"repository_path"`
+	WorktreePath   string `json:"worktree_path"`
+	HeadCommit     string `json:"head_commit"`
 }
 
 type CandidateSourceSummary struct {

@@ -2,6 +2,7 @@ package guard
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -24,34 +25,14 @@ func loadCandidate(path string) (*CandidateSummary, Result) {
 		r.Summary = err.Error()
 		return nil, r
 	}
-	var raw struct {
-		Spec        string `json:"spec"`
-		Requirement struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
-		} `json:"requirement"`
-		Readiness struct {
-			CriteriaTotal        int  `json:"criteriaTotal"`
-			CriteriaSatisfied    int  `json:"criteriaSatisfied"`
-			CriteriaWithEvidence int  `json:"criteriaWithEvidence"`
-			TasksTotal           int  `json:"tasksTotal"`
-			TasksDone            int  `json:"tasksDone"`
-			SourcesTotal         int  `json:"sourcesTotal"`
-			SourcesClean         int  `json:"sourcesClean"`
-			Ready                bool `json:"ready"`
-		} `json:"readiness"`
-		Sources []struct {
-			TaskID         string `json:"taskId"`
-			RepositoryPath string `json:"repositoryPath"`
-			Branch         string `json:"branch"`
-			HeadCommit     string `json:"headCommit"`
-			Clean          bool   `json:"clean"`
-		} `json:"sources"`
-	}
+	digest := sha256.Sum256(b)
+	r.Evidence["sha256"] = hex.EncodeToString(digest[:])
+	var raw candidateDocument
 	if err = json.Unmarshal(b, &raw); err != nil {
 		r.Summary = err.Error()
 		return nil, r
 	}
+	r.Evidence["generated_at"] = raw.GeneratedAt
 	c := &CandidateSummary{Spec: raw.Spec, RequirementID: raw.Requirement.ID, RequirementTitle: raw.Requirement.Title, CriteriaTotal: raw.Readiness.CriteriaTotal, CriteriaSatisfied: raw.Readiness.CriteriaSatisfied, CriteriaWithEvidence: raw.Readiness.CriteriaWithEvidence, TasksTotal: raw.Readiness.TasksTotal, TasksDone: raw.Readiness.TasksDone, SourcesTotal: raw.Readiness.SourcesTotal, SourcesClean: raw.Readiness.SourcesClean, Sources: []CandidateSourceSummary{}, Ready: raw.Readiness.Ready}
 	for _, source := range raw.Sources {
 		c.Sources = append(c.Sources, CandidateSourceSummary{TaskID: source.TaskID, RepositoryPath: source.RepositoryPath, Branch: source.Branch, HeadCommit: source.HeadCommit, Clean: source.Clean})
@@ -65,7 +46,7 @@ func loadCandidate(path string) (*CandidateSummary, Result) {
 		r.Summary = "release candidate is not ready"
 		return c, r
 	}
-	if c.RequirementID == "" || c.RequirementTitle == "" || c.CriteriaTotal == 0 || c.TasksTotal == 0 || c.SourcesTotal == 0 || c.CriteriaSatisfied != c.CriteriaTotal || c.CriteriaWithEvidence != c.CriteriaTotal || c.TasksDone != c.TasksTotal || c.SourcesClean != c.SourcesTotal {
+	if strings.TrimSpace(c.RequirementID) == "" || strings.TrimSpace(c.RequirementTitle) == "" || c.CriteriaTotal <= 0 || c.TasksTotal <= 0 || c.SourcesTotal <= 0 || c.CriteriaSatisfied != c.CriteriaTotal || c.CriteriaWithEvidence != c.CriteriaTotal || c.TasksDone != c.TasksTotal || c.SourcesClean != c.SourcesTotal {
 		r.Summary = "release candidate readiness counts are inconsistent"
 		return c, r
 	}
@@ -90,28 +71,79 @@ func loadCandidate(path string) (*CandidateSummary, Result) {
 		r.Summary = "release candidate clean source count is inconsistent"
 		return c, r
 	}
+	if err := validateCandidateDetails(raw, time.Now().UTC()); err != nil {
+		r.Summary = err.Error()
+		return c, r
+	}
+	for _, proof := range latestCandidateMachineChecks(raw.Evidence) {
+		c.MachineChecks = append(c.MachineChecks, CandidateMachineCheck{EvidenceID: proof.ID, RunID: proof.Metadata["verificationRunId"], RepositoryPath: proof.Metadata["sourceRepository"], WorktreePath: proof.Metadata["sourceWorktree"], HeadCommit: proof.Metadata["sourceCommit"]})
+	}
 	r.Status = "pass"
 	r.Summary = "release candidate is ready"
 	return c, r
 }
 
 func checkCandidateGit(candidate *CandidateSummary, manifest *GitManifest) Result {
-	result := Result{Name: "DevCycle source provenance", Type: "candidate-git", Status: "fail", Required: true, Evidence: map[string]any{"target_commit": manifest.TargetCommit}}
+	result := Result{Name: "DevCycle source provenance", Type: "candidate-git", Status: "fail", Required: true, Evidence: map[string]any{}}
 	if candidate == nil || manifest == nil {
 		result.Summary = "candidate and Git manifest are both required"
 		return result
 	}
+	result.Evidence["target_commit"] = manifest.TargetCommit
+	repository, err := os.Stat(manifest.Repository)
+	if err != nil || !repository.IsDir() {
+		result.Summary = "ReleaseGuard repository is unavailable"
+		return result
+	}
 	for _, source := range candidate.Sources {
-		if source.Clean && strings.EqualFold(source.HeadCommit, manifest.TargetCommit) {
-			result.Status = "pass"
-			result.Summary = "ReleaseGuard target commit matches a clean DevCycle source"
-			result.Evidence["source"] = source
-			return result
+		sourceRepository, statErr := os.Stat(source.RepositoryPath)
+		if source.Clean && strings.EqualFold(source.HeadCommit, manifest.TargetCommit) && statErr == nil && sourceRepository.IsDir() && os.SameFile(repository, sourceRepository) {
+			for _, proof := range candidate.MachineChecks {
+				if strings.EqualFold(proof.HeadCommit, manifest.TargetCommit) && candidateSamePath(proof.RepositoryPath, source.RepositoryPath) {
+					if !candidateSourcesMachineCovered(candidate) {
+						result.Summary = "candidate sources are not covered by current machine-verified commits"
+						return result
+					}
+					result.Status = "pass"
+					result.Summary = "ReleaseGuard target commit matches a machine-verified clean DevCycle source"
+					result.Evidence["source"] = source
+					result.Evidence["machine_check"] = proof
+					return result
+				}
+			}
 		}
 	}
-	result.Summary = "ReleaseGuard target commit is not pinned by a clean DevCycle source"
+	result.Summary = "ReleaseGuard target repository and commit lack a matching machine-verified clean DevCycle source"
 	result.Evidence["candidate_sources"] = candidate.Sources
 	return result
+}
+
+func candidateSourcesMachineCovered(candidate *CandidateSummary) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, source := range candidate.Sources {
+		covered := false
+		repository, err := os.Stat(source.RepositoryPath)
+		if err != nil || !repository.IsDir() {
+			return false
+		}
+		for _, proof := range candidate.MachineChecks {
+			proofRepository, err := os.Stat(proof.RepositoryPath)
+			if err != nil || !os.SameFile(repository, proofRepository) {
+				continue
+			}
+			cmd := exec.CommandContext(ctx, "git", "-C", proof.RepositoryPath, "merge-base", "--is-ancestor", source.HeadCommit, proof.HeadCommit)
+			prepareManagedCommand(cmd)
+			if cmd.Run() == nil {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
 }
 
 func buildGitManifest(ctx context.Context, p Plan) (*GitManifest, Result) {

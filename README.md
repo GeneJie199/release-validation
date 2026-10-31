@@ -1,9 +1,18 @@
 # ReleaseGuard
 
+
+## v2 development and licensing
+
+Stable: v1.x (historical Apache-2.0 releases). Under development: v2 AI Engineering Team; not GA.
+
+Community Edition: **AGPL-3.0-only** for this development source. Historical release rights remain valid.
+Commercial / OEM licensing available for closed-source redistribution, white-labeling, embedding and other use cases incompatible with AGPL. See [license policy](LICENSE_POLICY.md), [history](LICENSING_HISTORY.md) and [commercial policy](COMMERCIAL_LICENSE.md).
+
+
 AI DevOps Open Suite 的发布验证与证据模块。它把一份可评审 JSON 计划执行成确定性门禁、不可变报告、回滚步骤和独立人工批准记录。
 
 [![CI](https://github.com/GeneJie199/release-validation/actions/workflows/ci.yml/badge.svg)](https://github.com/GeneJie199/release-validation/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 ## Screenshot
 
@@ -211,6 +220,16 @@ infrascout check --state-dir /var/lib/infrascout --fail-on never
 
 ReleaseGuard 计划引用 `candidate_file`、`drift_file` 和 `fleet` 后，会生成同一份发布 Manifest。Fleet observation 会重复轮询而不是只采一张瞬时快照。`metrics` 策略直接查询 FleetScope 内置时序库，比较发布前基线和整个发布后窗口；Prometheus 等仅是 FleetScope 的兼容输入，不是 ReleaseGuard 运行依赖。
 
+使用 `candidate_file` 时必须同时配置 `repository`、`base_ref`、`target_ref`。候选的验收、任务与来源总数必须为正数且完成数一致；至少一个干净来源必须指向同一个实际仓库目录并与 Git 验证的目标提交一致。仅声明 `ready: true` 或复制提交字符串不能替代来源核验。候选中的 `repositoryPath` 应为本机可访问的绝对路径。GO 仅表示所配置的检查通过，仍需人工审核报告与证据，不授予生产部署权限。
+
+候选必须包含真实的 `acceptanceCriteria`、`tasks`、`evidence`，数量、唯一 ID、requirement/criterion/task/source 关联和完成状态均会核对。每个验收项按 `createdAt` 选择最新证据且必须通过；还需至少一项带已执行 `metadata.command` 的 `test`/`command` 机器检查证据，关联来源任务或 `metadata.workingDir`。同一命令/目录/任务的最新机器检查失败会阻断，文字成功声明不能替代机器检查。`generatedAt` 与用于决策的最新验收/机器检查证据必须在 24 小时内，未来时钟容差为 1 分钟。旧证据保留供审计；重新执行并导出的新通过证据可以覆盖过期记录，不能只编辑时间戳。若提供 `evidenceComplete` 或 `teamRuntime.evidenceComplete`，它们必须为 true。报告保存候选文件 SHA-256，供人工核对原始输入。
+
+机器检查还必须包含 `verificationRunId`，以及控制器在执行前后采集的 `sourceRepository`、`sourceWorktree`、`sourceCommit`、`sourceClean` 和对应 `After` 字段；只有实际 Git 来源在检查前后保持同一干净提交，`sourceVerified` 才能为 true。最新机器证据的提交必须匹配当前候选来源，且拟发布的目标提交必须有同仓库、同提交的机器证明。检查后修改或提交源码会使旧证明失效，需重新运行检查。未绑定 Git 的检查仍可用于普通无 `candidate_file` 计划，不能用来证明候选源码已验证。
+
+AI Team 修复重试使用控制器专属的 `missionId`、`planTaskId`、稳定真实 Task ID、`logicalCheckId`、`verificationCheckIndex`、`verificationAttempt`、`executionId` 和 run ID 关联同一逻辑检查；只有完整关联存在时，较高 attempt 的证明才能跨新 worktree 覆盖旧失败。不同逻辑检查/命令保持独立，最新失败仍会阻断；普通 v1 检查继续按命令、目录、任务区分，不能用另一目录的成功隐藏失败。所有候选来源还必须是同仓库机器验证提交本身或其祖先，发布目标仍须精确匹配已验证提交。公共 AddEvidence 不能写入这些控制器保留字段；本地 JSON 的真实性仍依赖下述信任边界。
+
+该门禁验证本地导出文件的内部一致性与 Git 来源绑定，不是签名的远程证明。能篡改本机候选、证据和源仓库的人仍处于信任边界内；跨信任边界使用时，应由可信 CI 重新运行检查，并独立核验制品与来源证明。
+
 观察期间每个样本都会写入 SQLite。活动 run 使用短期租约保证同一时刻只有一个进程执行门禁；正常中断立即释放，崩溃后的租约会自动过期。以相同计划和 `--state` 再次运行 `check` 会恢复同一个 run，只执行剩余观察窗口，不重复命令门禁或基线采集。`releaseguard runs` 可查看 run ID、阶段、样本数和最终决策。
 
 确定不再恢复的中断运行可用 `releaseguard runs --state releaseguard-runs.db --abandon RUN_ID --reason "change window closed"` 审计式关闭。工具对可恢复中断返回退出码 `3`，参数错误仍使用 `2`。
@@ -261,4 +280,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Action Install -
 - `playwright` 类型复用本机已安装的命令，不内置浏览器运行时。
 - 文件/命令/HTTP 证据证明计划检查结果，不证明计划之外的业务正确性。
 
-Apache-2.0。贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)。
+AGPL-3.0-only。贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)。

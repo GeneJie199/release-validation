@@ -93,6 +93,9 @@ func ValidatePlan(p *Plan) error {
 	if p.Repository != "" && (strings.TrimSpace(p.BaseRef) == "" || strings.TrimSpace(p.TargetRef) == "") {
 		return errors.New("base_ref and target_ref are required with repository")
 	}
+	if p.CandidateFile != "" && strings.TrimSpace(p.Repository) == "" {
+		return errors.New("candidate_file requires repository, base_ref and target_ref to verify source provenance")
+	}
 	if p.CandidateFile == "" && p.Repository == "" && len(p.Checks) == 0 && p.DriftFile == "" && p.ExpectedChangesFile == "" && p.Fleet == nil {
 		return errors.New("release plan must contain at least one delivery verification surface")
 	}

@@ -68,7 +68,7 @@ func TestCandidateGitManifestAndImmutableApproval(t *testing.T) {
 	targetBytes, _ := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
 	target := string(bytes.TrimSpace(targetBytes))
 	candidate := filepath.Join(d, "candidate.json")
-	candidateJSON := fmt.Sprintf(`{"spec":"lifecycle-spec/release-candidate/v1","requirement":{"id":"req-1","title":"Ship"},"sources":[{"taskId":"task-1","repositoryPath":%q,"branch":"main","headCommit":%q,"clean":true}],"readiness":{"criteriaTotal":1,"criteriaSatisfied":1,"criteriaWithEvidence":1,"tasksTotal":1,"tasksDone":1,"sourcesTotal":1,"sourcesClean":1,"ready":true}}`, repo, target)
+	candidateJSON := validCandidateJSON(repo, target)
 	if err := os.WriteFile(candidate, []byte(candidateJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +78,110 @@ func TestCandidateGitManifestAndImmutableApproval(t *testing.T) {
 	if r.Decision != "GO" || r.Manifest.Git == nil || len(r.Manifest.Git.MigrationFiles) != 1 {
 		t.Fatalf("report=%+v", r)
 	}
+	for _, test := range []struct {
+		name     string
+		rewrite  func(string) string
+		omitRepo bool
+	}{
+		{name: "candidate without Git provenance", omitRepo: true},
+		{name: "positive summary cannot replace evidence details", rewrite: func(s string) string {
+			var document map[string]any
+			_ = json.Unmarshal([]byte(s), &document)
+			delete(document, "acceptanceCriteria")
+			delete(document, "tasks")
+			delete(document, "evidence")
+			data, _ := json.Marshal(document)
+			return string(data)
+		}},
+		{name: "negative acceptance counts", rewrite: func(s string) string {
+			s = strings.ReplaceAll(s, `"criteriaTotal":1`, `"criteriaTotal":-1`)
+			s = strings.ReplaceAll(s, `"criteriaSatisfied":1`, `"criteriaSatisfied":-1`)
+			return strings.ReplaceAll(s, `"criteriaWithEvidence":1`, `"criteriaWithEvidence":-1`)
+		}},
+		{name: "negative task counts", rewrite: func(s string) string {
+			s = strings.ReplaceAll(s, `"tasksTotal":1`, `"tasksTotal":-1`)
+			return strings.ReplaceAll(s, `"tasksDone":1`, `"tasksDone":-1`)
+		}},
+		{name: "nonexistent source with real target hash", rewrite: func(s string) string {
+			return strings.Replace(s, fmt.Sprintf(`"repositoryPath":%q`, repo), fmt.Sprintf(`"repositoryPath":%q`, filepath.Join(d, "missing")), 1)
+		}},
+		{name: "unrelated directory with real target hash", rewrite: func(s string) string {
+			return strings.Replace(s, fmt.Sprintf(`"repositoryPath":%q`, repo), fmt.Sprintf(`"repositoryPath":%q`, d), 1)
+		}},
+		{name: "source target hash mismatch", rewrite: func(s string) string {
+			return strings.Replace(s, target, strings.Repeat("a", 40), 1)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			modified := candidateJSON
+			if test.rewrite != nil {
+				modified = test.rewrite(modified)
+			}
+			if err := os.WriteFile(candidate, []byte(modified), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			plan := p
+			if test.omitRepo {
+				plan.Repository, plan.BaseRef, plan.TargetRef = "", "", ""
+			}
+			planBytes, _ := json.Marshal(plan)
+			if report := Run(context.Background(), plan, planBytes); report.Decision != "NO-GO" {
+				t.Fatalf("unverified candidate returned %s: %+v", report.Decision, report.Results)
+			}
+		})
+	}
+	t.Run("source change invalidates proof and fresh revalidation recovers", func(t *testing.T) {
+		var document candidateDocument
+		if err := json.Unmarshal([]byte(candidateJSON), &document); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("new release source"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		run("add", "README.md")
+		run("commit", "-m", "source changed after machine verification")
+		newHead, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		document.Sources[0].HeadCommit = strings.TrimSpace(string(newHead))
+		document.GeneratedAt = time.Now().UTC()
+		check := func(want string) {
+			t.Helper()
+			raw, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(candidate, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			planBytes, _ := json.Marshal(p)
+			report := Run(context.Background(), p, planBytes)
+			if report.Decision != want {
+				t.Fatalf("got %s, want %s: %+v", report.Decision, want, report.Results)
+			}
+		}
+		check("NO-GO")
+		old := document.Evidence[0]
+		old.CreatedAt = time.Now().Add(-25 * time.Hour)
+		fresh := old
+		fresh.ID = "fresh-proof"
+		fresh.CreatedAt = time.Now().UTC()
+		fresh.Metadata = map[string]string{}
+		for key, value := range old.Metadata {
+			fresh.Metadata[key] = value
+		}
+		fresh.Metadata["sourceCommit"] = document.Sources[0].HeadCommit
+		fresh.Metadata["sourceCommitAfter"] = document.Sources[0].HeadCommit
+		fresh.Metadata["verificationRunId"] = "fresh-run"
+		document.Evidence = []candidateEvidence{old, fresh}
+		check("GO")
+		document.Evidence[1].Status = "failed"
+		check("NO-GO")
+		document.Evidence = []candidateEvidence{fresh}
+		document.Evidence[0].CreatedAt = time.Now().Add(-25 * time.Hour)
+		check("NO-GO")
+	})
 	out := filepath.Join(d, "report.json")
 	if err := WriteReport(out, r); err != nil {
 		t.Fatal(err)

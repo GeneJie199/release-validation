@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0 (2026-10-31) — RC.1
+
+- Community RC: AI Team integration, AGPL-3.0-only source, preserved historical Apache rights.
+- Release gate, full license notices and offline Corresponding Source packaging.
+- See RELEASE_NOTES.md for maturity, safety, upgrade and rollback boundaries.
+
 ## 1.0.0 - 2026-08-23
 
 - Deliver deterministic candidate, Git, configuration, SQL, HTTP, file, Fleet, metric-regression, observation, expected-change, and rollback-readiness gates in one checkpointed release flow.
