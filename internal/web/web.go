@@ -232,6 +232,10 @@ func handler(reportPath, approvalToken string, runs *runstore.Store) http.Handle
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'")
 		w.Header().Set("Cache-Control", "no-store")
+		if !localBrowserRequest(r) {
+			http.Error(w, "non-local Host or cross-site request refused", http.StatusForbidden)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
 }
