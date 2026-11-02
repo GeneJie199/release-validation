@@ -83,3 +83,7 @@ sudo systemctl enable --now releaseguard-report
 ```
 
 The checksum argument is optional for local builds and required for downloaded release binaries. The installer verifies the selected binary entry before installing it. The release workflow runs the full test and security gate before any tagged artifact is built.
+
+## Runtime diagnostics
+
+`GET /api/v1/diagnostics/runtime` provides read-only process diagnostics through the existing web listener and Host/Origin protections. Responses disable caching and contain only `goroutines`, `heapAllocBytes`, `heapSysBytes`, `heapInuseBytes`, `systemBytes`, `gcCount`, and `uptimeSeconds`. Values come from the live Go runtime; uptime is measured from package initialization. No environment, configuration, paths, stacks, or process commands are exposed. This endpoint is observational and does not establish business readiness.
