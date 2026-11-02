@@ -62,6 +62,7 @@ func handler(reportPath, approvalToken string, runs *runstore.Store) http.Handle
 		return nil, nil
 	}
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) { write(w, map[string]string{"status": "ok"}) })
+	mux.HandleFunc("GET /api/v1/diagnostics/runtime", handleRuntimeDiagnostics)
 	mux.HandleFunc("GET /api/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		active, err := latestActive(r.Context())
 		write(w, map[string]bool{"approval_write": approvalToken != "" && err == nil && active == nil, "live_runs": runs != nil, "approval_blocked_by_active_run": active != nil})
