@@ -322,11 +322,26 @@
     const decision = $("#decision");
     decision.textContent = data.decision || "UNKNOWN";
     decision.className = String(data.decision || "unknown").toLowerCase();
-    $("#generated").textContent = `生成于 ${fmtDate(data.generated_at)}`;
+    $("#generated").textContent = `${data.release_id === "quickstart-demo" ? "示例报告 · 不代表当前发布状态 · " : ""}生成于 ${fmtDate(data.generated_at)}`;
 	renderReleaseFlow(data);
 	const results = list(data.results);
     const passed = results.filter((result) => result.status === "pass").length;
     const required = results.filter((result) => result.required).length;
+    const categories = [
+      {label: "通过", count: passed, className: "pass"},
+      {label: "失败", count: results.filter((result) => result.status === "fail").length, className: "fail"},
+      {label: "待确认 / 其他", count: results.filter((result) => !["pass", "fail"].includes(result.status)).length, className: "pending"},
+    ];
+    const circumference = 2 * Math.PI * 45;
+    let offset = 0;
+    const segments = categories.map((item) => {
+      const length = results.length ? item.count / results.length * circumference : 0;
+      const segment = length ? `<circle class="gate-arc ${item.className}" cx="62" cy="62" r="45" fill="none" stroke-width="14" stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-offset}" transform="rotate(-90 62 62)"/>` : "";
+      offset += length;
+      return segment;
+    }).join("");
+    $("#gate-distribution").innerHTML = results.length ? `<div><span class="eyebrow">本次报告 · 实际检查</span><h3>门禁分布</h3><p>按当前报告的检查状态计数，不代表历史发布成功率。</p><a href="#checks" data-jump="checks">查看全部门禁与证据 →</a></div><div class="gate-donut" role="img" aria-label="${categories.map((item) => `${item.label} ${item.count} 项`).join("，")}" ><svg viewBox="0 0 124 124" aria-hidden="true">${segments}</svg><span><b>${results.length}</b>项检查</span></div><ul class="gate-legend">${categories.map((item) => `<li><span class="legend-dot ${item.className}"></span><span>${item.label}</span><b>${item.count}</b></li>`).join("")}</ul>` : empty("报告未包含检查结果，暂无可展示的门禁统计。");
+
 	$("#metrics").innerHTML = [[data.version || "-", "版本"], [`${passed}/${results.length}`, "检查通过"], [required, "必须门禁"], [list(data.manifest?.git?.commits).length, "包含提交"]].map(([value, label]) => `<div class="metric"><span>${label}</span><b>${esc(value)}</b></div>`).join("");
     $("#reason").textContent = decisionReasonText(data.decision_reason) || (data.decision === "GO" ? "全部必须门禁已通过。" : "存在未通过的必须门禁，请进入门禁结果处理。");
     $("#reason").classList.toggle("fail", data.decision !== "GO");
