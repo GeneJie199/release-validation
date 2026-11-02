@@ -5,3 +5,6 @@
 LICENSES/** -text
 LICENSE text eol=lf
 internal/team/AGPL-3.0-only.txt text eol=lf
+
+internal/web/static/suite-design.css text eol=lf
+internal/web/static/suite-ui.js text eol=lf
